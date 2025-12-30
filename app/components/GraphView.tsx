@@ -68,6 +68,9 @@ const GraphViewContent: React.FC<GraphViewProps> = ({ nodes, edges }) => {
                     style: { stroke: isDark ? '#52525b' : '#d4d4d8', strokeWidth: 1.5 },
                 }}
                 proOptions={{ hideAttribution: true }}
+                onlyRenderVisibleElements={true}
+                nodesDraggable={false}
+                nodesConnectable={false}
             >
                 <Background color={isDark ? "#18181b" : "#e4e4e7"} gap={20} size={1} />
                 <Controls

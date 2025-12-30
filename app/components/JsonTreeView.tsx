@@ -63,7 +63,10 @@ const JsonTreeNode: React.FC<JsonTreeViewProps> = ({
 
     const handleCopy = (e: React.MouseEvent) => {
         e.stopPropagation();
-        navigator.clipboard.writeText(JSON.stringify(data));
+        const textToCopy = name !== undefined
+            ? `"${name}": ${JSON.stringify(data)}`
+            : JSON.stringify(data);
+        navigator.clipboard.writeText(textToCopy);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
@@ -106,7 +109,7 @@ const JsonTreeNode: React.FC<JsonTreeViewProps> = ({
         <div className="font-mono text-xs leading-5 select-none whitespace-nowrap">
             <div
                 className={cn(
-                    "flex items-center rounded-sm px-1 -ml-1 cursor-pointer transition-colors group border border-transparent",
+                    "flex items-center rounded-sm px-1 -ml-1 cursor-pointer transition-colors group border border-transparent min-w-full w-fit",
                     isSelected
                         ? "bg-[#e5f3ff] dark:bg-[#004b91]/30 border-[#cce8ff] dark:border-[#003366]"
                         : "hover:bg-zinc-100 dark:hover:bg-zinc-800/50"
@@ -153,7 +156,7 @@ const JsonTreeNode: React.FC<JsonTreeViewProps> = ({
                 {/* Inline Actions */}
                 <button
                     onClick={handleCopy}
-                    className="ml-auto opacity-0 group-hover:opacity-100 p-0.5 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded transition-all"
+                    className="ml-auto sticky right-2 opacity-0 group-hover:opacity-100 p-0.5 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded transition-all shrink-0 backdrop-blur-sm"
                     title="Copy JSON"
                 >
                     {copied ? <Check size={10} className="text-emerald-500" /> : <Copy size={10} className="text-zinc-400" />}

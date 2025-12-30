@@ -55,7 +55,6 @@ export default function PropertyTable({ data, name }: PropertyTableProps) {
             <div className="flex bg-gray-100 dark:bg-zinc-800 border-b border-zinc-300 dark:border-zinc-700 text-xs font-semibold text-zinc-600 dark:text-zinc-300 select-none">
                 <div className="flex-1 px-2 py-1 border-r border-zinc-300 dark:border-zinc-700 flex items-center">
                     Name
-                    <span className="text-[9px] ml-1 text-zinc-400">▲</span>
                 </div>
                 <div className="flex-[2] px-2 py-1 flex items-center">
                     Value

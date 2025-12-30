@@ -18,8 +18,11 @@ import {
   Lock,
   Unlock,
   Link as LinkIcon,
-  ArrowRight
+  ArrowRight,
+  AlertCircle
 } from "lucide-react";
+
+import { getJsonParseError } from "@/lib/json-error";
 
 import type { ShareLinkRecord, ShareAccessType } from "@/lib/shareLinks";
 import { getSocket } from "@/lib/socket";
@@ -82,6 +85,7 @@ export default function Home({ initialRecord }: HomeProps) {
   const [isValid, setIsValid] = useState(true);
   const [layouting, setLayouting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<{ message: string; line?: number } | null>(null);
 
   // Split state: 
   // 1. jsonInput = Source of Truth for Saving/Graph (Updated by local typing)
@@ -180,24 +184,25 @@ export default function Home({ initialRecord }: HomeProps) {
     isValidRef.current = isValid;
   }, [slug, isLocked, isPrivate, isValid]);
 
+  const emitTimeout = React.useRef<NodeJS.Timeout | null>(null);
+
   // Stable Change Handler
   const handleJsonChange = useCallback((newCode: string | undefined) => {
     const code = newCode || "";
     setJsonInput(code);
 
-    // Emit change if we have a slug and aren't locked
-    if (slugRef.current && !isLockedRef.current && !isPrivateRef.current && isValidRef.current) {
-      const socket = getSocket();
-      if (socket && socket.connected) {
-        socket.emit("code-change", { slug: slugRef.current, newCode: code });
+    // Debounce socket emission to prevent flooding/lag
+    if (emitTimeout.current) clearTimeout(emitTimeout.current);
+
+    emitTimeout.current = setTimeout(() => {
+      // Emit change if we have a slug and aren't locked (regardless of validity)
+      if (slugRef.current && !isLockedRef.current) {
+        const socket = getSocket();
+        if (socket && socket.connected) {
+          socket.emit("code-change", { slug: slugRef.current, newCode: code });
+        }
       }
-    } else if (slugRef.current && isPrivateRef.current && !isLockedRef.current) {
-      // Private unlocked
-      const socket = getSocket();
-      if (socket && socket.connected) {
-        socket.emit("code-change", { slug: slugRef.current, newCode: code });
-      }
-    }
+    }, 300);
   }, []); // ID IS STABLE NOW
 
   // Socket Effect
@@ -395,6 +400,43 @@ export default function Home({ initialRecord }: HomeProps) {
 
 
 
+  // Resizable Pane Logic
+  const [leftWidth, setLeftWidth] = useState(40); // Default 40%
+  const [isDragging, setIsDragging] = useState(false);
+
+  const startResizing = useCallback((mouseDownEvent: React.MouseEvent) => {
+    mouseDownEvent.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const stopResizing = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const resize = useCallback((mouseMoveEvent: MouseEvent) => {
+    if (isDragging) {
+      const newWidth = (mouseMoveEvent.clientX / window.innerWidth) * 100;
+      // Constraint between 20% and 80%
+      if (newWidth > 20 && newWidth < 80) {
+        setLeftWidth(newWidth);
+      }
+    }
+  }, [isDragging]);
+
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener("mousemove", resize);
+      window.addEventListener("mouseup", stopResizing);
+    } else {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResizing);
+    }
+    return () => {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResizing);
+    };
+  }, [isDragging, resize, stopResizing]);
+
   const handleShare = async (settings: { accessType: ShareAccessType; isPrivate: boolean; password?: string }) => {
     // Validate
     if (settings.isPrivate && (!settings.password || settings.password.length < 4)) {
@@ -454,15 +496,25 @@ export default function Home({ initialRecord }: HomeProps) {
     }
   };
 
-  // Debounce the input for Layout calculations (1000ms)
-  const debouncedJsonInput = useDebounce(jsonInput, 1000);
+  // Debounce the input for Layout calculations (500ms)
+  const debouncedJsonInput = useDebounce(jsonInput, 500);
 
   // Layout Effect - Depends on debounced input
   useEffect(() => {
+    if (!debouncedJsonInput || !debouncedJsonInput.trim()) {
+      setParsedJson(null);
+      setIsValid(true);
+      setNodes([]);
+      setEdges([]);
+      setErrorMessage(null);
+      return;
+    }
+
     try {
       const parsed = JSON.parse(debouncedJsonInput);
       setParsedJson(parsed);
       setIsValid(true);
+      setErrorMessage(null);
 
       if (activeTab === "visualize") {
         setLayouting(true);
@@ -474,6 +526,9 @@ export default function Home({ initialRecord }: HomeProps) {
       }
     } catch (e) {
       setIsValid(false);
+      if (e instanceof SyntaxError) {
+        setErrorMessage(getJsonParseError(debouncedJsonInput, e));
+      }
     }
   }, [debouncedJsonInput, activeTab]);
 
@@ -502,7 +557,7 @@ export default function Home({ initialRecord }: HomeProps) {
   const [mobileTab, setMobileTab] = useState<"editor" | "viewer">("editor");
 
   return (
-    <div className="flex h-screen w-screen bg-gray-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-300 font-sans overflow-hidden">
+    <div className="flex h-[100dvh] w-screen bg-gray-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-300 font-sans overflow-hidden">
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
@@ -579,12 +634,14 @@ export default function Home({ initialRecord }: HomeProps) {
         <main className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
 
           {/* Editor Pane (Left/Top) */}
-          <div className={cn(
-            "border-b lg:border-b-0 lg:border-r border-zinc-200 dark:border-zinc-900 flex flex-col bg-white dark:bg-[#09090b] h-full",
-            activeTab === "tree" ? "hidden" : "w-full lg:w-[40%] lg:min-w-[300px]",
-            // Mobile visibility toggle
-            mobileTab === 'editor' ? 'flex' : 'hidden lg:flex'
-          )}>
+          <div
+            style={{ "--left-panel-width": `${leftWidth}%` } as React.CSSProperties}
+            className={cn(
+              "border-b lg:border-b-0 lg:border-r border-zinc-200 dark:border-zinc-900 flex flex-col bg-white dark:bg-[#09090b] h-full",
+              "w-full lg:w-[var(--left-panel-width)] lg:min-w-[300px]",
+              // Mobile visibility toggle
+              mobileTab === 'editor' ? 'flex' : 'hidden lg:flex'
+            )}>
             <div className="flex-1 relative">
               <JsonEditor
                 className="pt-14 lg:pt-0"
@@ -592,7 +649,37 @@ export default function Home({ initialRecord }: HomeProps) {
                 remoteValue={remoteCode} // Updates Only
                 onChange={handleJsonChange}
                 readOnly={!canEdit}
+                options={{
+                  padding: { top: 16, bottom: 100 } // Ensure last lines are visible above floating alert
+                }}
               />
+
+
+              {/* Error Alert Overlay */}
+              {!isValid && errorMessage && (
+                <div className="absolute bottom-4 left-4 right-4 lg:bottom-6 lg:left-8 lg:right-8 z-30 animate-in fade-in slide-in-from-bottom-2">
+                  <div className="bg-white/95 dark:bg-zinc-900/95 border border-red-200 dark:border-red-900/50 backdrop-blur-md p-3 lg:p-4 rounded-xl shadow-xl flex items-start gap-3 lg:gap-4 ring-1 ring-black/5 dark:ring-white/5">
+                    <div className="p-1.5 lg:p-2 bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-900/30 rounded-lg text-red-600 dark:text-red-500 shrink-0 shadow-sm">
+                      <AlertCircle className="w-4 h-4 lg:w-5 lg:h-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 lg:gap-4">
+                        <h4 className="text-xs lg:text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                          Invalid JSON
+                        </h4>
+                        {errorMessage.line && (
+                          <span className="text-[10px] font-mono font-bold text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900/50 px-1.5 lg:px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm">
+                            Line {errorMessage.line}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] lg:text-xs text-zinc-600 dark:text-zinc-400 mt-1 lg:mt-1.5 font-mono break-words leading-relaxed border-l-2 border-red-200 dark:border-red-900/50 pl-2 lg:pl-3">
+                        {errorMessage.message}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Go to View Button (Mobile Only) */}
               <div className="lg:hidden absolute top-2 right-14 z-20">
@@ -607,13 +694,23 @@ export default function Home({ initialRecord }: HomeProps) {
             </div>
           </div>
 
+          {/* Resizer Handle */}
+          <div
+            className={`hidden lg:flex w-1 bg-transparent cursor-col-resize z-40 items-center justify-center transition-colors`}
+            onMouseDown={startResizing}
+          >
+            {/* Optional Grip Icon or dots */}
+          </div>
+
           {/* View Pane (Right/Bottom) */}
-          <div className={cn(
-            "bg-gray-50 dark:bg-[#050505] relative overflow-hidden h-full",
-            activeTab === "tree" ? "w-full" : "w-full lg:w-[60%]",
-            // Mobile visibility toggle
-            mobileTab === 'viewer' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'
-          )}>
+          <div
+            style={{ "--right-panel-width": `${100 - leftWidth}%` } as React.CSSProperties}
+            className={cn(
+              "bg-gray-50 dark:bg-[#050505] relative overflow-hidden h-full",
+              "w-full lg:w-[var(--right-panel-width)]",
+              // Mobile visibility toggle
+              mobileTab === 'viewer' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'
+            )}>
 
             {/* Back to Editor Button (Mobile Only) */}
             <div className="lg:hidden absolute top-2 right-10 z-[70]">
@@ -625,6 +722,9 @@ export default function Home({ initialRecord }: HomeProps) {
                 Back to Editor
               </button>
             </div>
+
+
+
 
             {/* Navigation: Sidebar for Graph/Formatter/Tree */}
             <div className="absolute top-4 left-4 z-50 flex flex-col gap-3">
@@ -682,50 +782,64 @@ export default function Home({ initialRecord }: HomeProps) {
                 </div>
               </div>
             </div>
-            {activeTab === "visualize" && (
-              <div className="h-full w-full pl-16">
-                {layouting ? (
-                  <div className="flex h-full items-center justify-center text-zinc-500 gap-2">
-                    <div className="w-4 h-4 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
-                    Layouting...
+            {isValid && !parsedJson ? (
+              <div className="h-full w-full flex flex-col items-center justify-center pl-16 animate-in fade-in zoom-in-95 duration-200">
+                <div className="mb-4 p-4 rounded-full bg-zinc-200 dark:bg-zinc-800/50">
+                  <Code2 size={48} className="opacity-50 text-zinc-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-zinc-700 dark:text-zinc-200">Empty JSON</h3>
+                <p className="max-w-xs text-center text-sm text-zinc-500">
+                  Please enter valid JSON data in the editor to visualize it.
+                </p>
+              </div>
+            ) : (
+              <>
+                {activeTab === "visualize" && (
+                  <div className="h-full w-full pl-16">
+                    {layouting ? (
+                      <div className="flex h-full items-center justify-center text-zinc-500 gap-2">
+                        <div className="w-4 h-4 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
+                        Layouting...
+                      </div>
+                    ) : (
+                      <GraphView nodes={nodes} edges={edges} />
+                    )}
                   </div>
-                ) : (
-                  <GraphView nodes={nodes} edges={edges} />
                 )}
-              </div>
-            )}
 
-            {activeTab === "tree" && (
-              <div className="h-full w-full overflow-hidden pl-16">
-                <TreeExplorer data={parsedJson} />
-              </div>
-            )}
-
-            {activeTab === "formatter" && (
-              <div className="h-full w-full flex flex-col">
-                <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 dark:border-zinc-900 bg-white/50 dark:bg-zinc-900/50 ml-16 rounded-tl-xl">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-zinc-500">FORMATTER</span>
-                    <select
-                      value={tabSize}
-                      onChange={(e) => setTabSize(e.target.value)}
-                      className="bg-zinc-100 dark:bg-zinc-800 border-none text-zinc-900 dark:text-zinc-300 text-xs rounded px-2 py-1 focus:ring-1 focus:ring-emerald-500/50 outline-none cursor-pointer"
-                    >
-                      <option value="2">2 Tabs</option>
-                      <option value="3">3 Tabs</option>
-                      <option value="4">4 Tabs</option>
-                      <option value="minify">Minify</option>
-                    </select>
+                {activeTab === "tree" && (
+                  <div className="h-full w-full overflow-hidden pl-16">
+                    <TreeExplorer data={parsedJson} />
                   </div>
-                  <button onClick={handleCopy} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors group relative">
-                    {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} className="text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-200" />}
-                    <span className="absolute right-full mr-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-zinc-800 text-zinc-300 text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity">Copy Output</span>
-                  </button>
-                </div>
-                <div className="flex-1 ml-16">
-                  <JsonEditor defaultValue={formattedOutput} remoteValue={formattedOutput} onChange={() => { }} readOnly={true} />
-                </div>
-              </div>
+                )}
+
+                {activeTab === "formatter" && (
+                  <div className="h-full w-full flex flex-col">
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 dark:border-zinc-900 bg-white/50 dark:bg-zinc-900/50 ml-16 rounded-tl-xl">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-zinc-500">FORMATTER</span>
+                        <select
+                          value={tabSize}
+                          onChange={(e) => setTabSize(e.target.value)}
+                          className="bg-zinc-100 dark:bg-zinc-800 border-none text-zinc-900 dark:text-zinc-300 text-xs rounded px-2 py-1 focus:ring-1 focus:ring-emerald-500/50 outline-none cursor-pointer"
+                        >
+                          <option value="2">2 Tabs</option>
+                          <option value="3">3 Tabs</option>
+                          <option value="4">4 Tabs</option>
+                          <option value="minify">Minify</option>
+                        </select>
+                      </div>
+                      <button onClick={handleCopy} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors group relative">
+                        {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} className="text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-200" />}
+                        <span className="absolute right-full mr-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-zinc-800 text-zinc-300 text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity">Copy Output</span>
+                      </button>
+                    </div>
+                    <div className="flex-1 ml-16">
+                      <JsonEditor defaultValue={formattedOutput} remoteValue={formattedOutput} onChange={() => { }} readOnly={true} />
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </main>
