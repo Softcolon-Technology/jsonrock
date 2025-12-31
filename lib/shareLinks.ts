@@ -1,5 +1,6 @@
-import { randomBytes, createHash, timingSafeEqual } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
 import { getDb } from "./mongodb";
+import { generateSlug } from "./utils";
 
 export type JsonShareMode = "visualize" | "tree" | "formatter";
 
@@ -14,11 +15,9 @@ export interface ShareLinkRecord {
   accessType?: ShareAccessType; // Defaults to 'viewer' if undefined for old records
   passwordHash?: string;
   createdAt: Date;
+  updatedAt: Date;
 }
 
-function generateSlug() {
-  return randomBytes(6).toString("base64url");
-}
 
 function hashPassword(password: string): string {
   return createHash("sha256").update(password).digest("hex");
@@ -42,6 +41,7 @@ export async function createShareLink(input: {
     accessType: input.accessType || "viewer",
     passwordHash: input.isPrivate && input.password ? hashPassword(input.password) : undefined,
     createdAt: new Date(),
+    updatedAt: new Date(),
   };
 
   await db.collection<ShareLinkRecord>("share_links").insertOne(record);
@@ -64,6 +64,7 @@ export async function updateShareLink(slug: string, input: {
     mode: input.mode,
     isPrivate: input.isPrivate,
     accessType: input.accessType || "viewer",
+    updatedAt: new Date(),
   };
 
   if (input.isPrivate && input.password) {

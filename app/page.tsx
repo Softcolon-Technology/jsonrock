@@ -19,7 +19,9 @@ import {
   Unlock,
   Link as LinkIcon,
   ArrowRight,
-  AlertCircle
+  AlertCircle,
+  UploadCloud,
+  X
 } from "lucide-react";
 
 import { getJsonParseError } from "@/lib/json-error";
@@ -437,6 +439,41 @@ export default function Home({ initialRecord }: HomeProps) {
     };
   }, [isDragging, resize, stopResizing]);
 
+  // Upload Logic
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Upload failed");
+      }
+
+      // Success - Redirect
+      addOwnership(data.slug);
+      window.location.href = `/share/${data.slug}`;
+
+    } catch (error) {
+      console.error(error);
+      showAlert("Upload Failed", (error as Error).message, "error");
+      setIsUploading(false);
+    }
+  };
+
   const handleShare = async (settings: { accessType: ShareAccessType; isPrivate: boolean; password?: string }) => {
     // Validate
     if (settings.isPrivate && (!settings.password || settings.password.length < 4)) {
@@ -483,10 +520,16 @@ export default function Home({ initialRecord }: HomeProps) {
 
       // Copy Link
       const link = `${window.location.origin}/share/${newSlug}`;
-      navigator.clipboard.writeText(link);
+      let message = "Settings saved and link copied to clipboard!";
+      try {
+        await navigator.clipboard.writeText(link);
+      } catch (err) {
+        console.warn("Clipboard write failed", err);
+        message = "Settings saved. You can copy the link from the address bar.";
+      }
 
       setIsShareOpen(false);
-      showAlert("Link Shared", "Settings saved and link copied to clipboard!", "success");
+      showAlert("Link Shared", message, "success");
 
     } catch (e) {
       console.error(e);
@@ -576,6 +619,16 @@ export default function Home({ initialRecord }: HomeProps) {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
+            {/* Upload Button */}
+            <button
+              onClick={() => setIsUploadOpen(true)}
+              className="flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 transition-colors text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200"
+              title="Upload JSON"
+            >
+              <UploadCloud size={14} />
+              <span className="hidden sm:inline">Upload</span>
+            </button>
+
             {/* New Button */}
             <button
               onClick={handleNew}
@@ -815,9 +868,9 @@ export default function Home({ initialRecord }: HomeProps) {
 
                 {activeTab === "formatter" && (
                   <div className="h-full w-full flex flex-col">
-                    <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 dark:border-zinc-900 bg-white/50 dark:bg-zinc-900/50 ml-16 rounded-tl-xl">
+                    <div className="flex items-center justify-between pl-4 pr-4 py-1 bg-gradient-to-b from-gray-50 to-gray-100 dark:from-zinc-800 dark:to-zinc-900 border-b border-zinc-300 dark:border-zinc-700 h-11 shrink-0 ml-16">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-zinc-500">FORMATTER</span>
+                        <span className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 whitespace-nowrap">JSON Formatter</span>
                         <select
                           value={tabSize}
                           onChange={(e) => setTabSize(e.target.value)}
@@ -835,7 +888,7 @@ export default function Home({ initialRecord }: HomeProps) {
                       </button>
                     </div>
                     <div className="flex-1 ml-16">
-                      <JsonEditor defaultValue={formattedOutput} remoteValue={formattedOutput} onChange={() => { }} readOnly={true} />
+                      <JsonEditor defaultValue={formattedOutput} remoteValue={formattedOutput} onChange={() => { }} readOnly={true} className="rounded-none border-0 shadow-none" />
                     </div>
                   </div>
                 )}
@@ -851,6 +904,64 @@ export default function Home({ initialRecord }: HomeProps) {
         message={alertConfig.message}
         type={alertConfig.type}
       />
+
+      {/* Upload Modal */}
+      {isUploadOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl max-w-md w-full p-6 animate-in zoom-in-95">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                <UploadCloud size={20} className="text-emerald-500" />
+                Upload JSON File
+              </h3>
+              <button
+                onClick={() => setIsUploadOpen(false)}
+                className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div
+                className="p-8 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg flex flex-col items-center justify-center text-center hover:border-emerald-500/50 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors cursor-pointer"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <UploadCloud size={32} className="text-zinc-400 mb-2" />
+                <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                  Click to select file
+                </p>
+                <p className="text-xs text-zinc-500 mt-1">
+                  .json files only
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                />
+              </div>
+
+              {isUploading && (
+                <div className="flex items-center justify-center gap-2 text-sm text-emerald-600 dark:text-emerald-500 animate-pulse">
+                  <span>Uploading and processing...</span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setIsUploadOpen(false)}
+                  className="px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                  disabled={isUploading}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Unlock Modal */}
       {
