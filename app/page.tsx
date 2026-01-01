@@ -92,7 +92,7 @@ export default function Home({ initialRecord }: HomeProps) {
   // Split state: 
   // 1. jsonInput = Source of Truth for Saving/Graph (Updated by local typing)
   // 2. remoteCode = Source of Truth for Editor Display (Updated ONLY by Socket/System)
-  const [remoteCode, setRemoteCode] = useState<string | null>(null);
+  const [remoteCode, setRemoteCode] = useState<{ code: string; nonce: number } | null>(null);
 
   // Formatter State moved up to group with others or left here, but socket logic removed from here
   const [tabSize, setTabSize] = useState<string>("2");
@@ -222,7 +222,7 @@ export default function Home({ initialRecord }: HomeProps) {
 
     const onCodeChange = (newCode: string) => {
       setJsonInput(newCode); // Update Save State
-      setRemoteCode(newCode); // Update Editor Display
+      setRemoteCode({ code: newCode, nonce: Date.now() }); // Update Editor Display
     };
 
     if (socket.connected) {
@@ -277,7 +277,8 @@ export default function Home({ initialRecord }: HomeProps) {
 
       // Success
       setJsonInput(data.json);
-      setRemoteCode(data.json); // Force Editor Update
+      setJsonInput(data.json);
+      setRemoteCode({ code: data.json, nonce: Date.now() }); // Force Editor Update
       setActiveTab(data.mode);
       setIsPrivate(data.isPrivate);
       setAccessType(data.accessType || "viewer");
@@ -324,7 +325,10 @@ export default function Home({ initialRecord }: HomeProps) {
     setAccessType("viewer"); // Default for new link settings
     setCanEdit(true); // New file is always editable
     setPassword("");
-    setRemoteCode('{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}');
+    setRemoteCode({
+      code: '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}',
+      nonce: Date.now()
+    });
 
     // Create initial record
     setIsSaving(true);
@@ -529,7 +533,7 @@ export default function Home({ initialRecord }: HomeProps) {
       }
 
       setIsShareOpen(false);
-      showAlert("Link Shared", message, "success");
+      showAlert("Link Copied", message, "success");
 
     } catch (e) {
       console.error(e);
@@ -606,11 +610,12 @@ export default function Home({ initialRecord }: HomeProps) {
       <div className="flex-1 flex flex-col min-w-0">
 
         {/* Top Bar */}
-        <header className="h-14 border-b border-zinc-200 dark:border-zinc-900 flex items-center justify-between px-4 lg:px-6 bg-white dark:bg-zinc-950 shrink-0">
-          <div className="flex items-center gap-3">
-            <h1 className="font-semibold text-zinc-900 dark:text-zinc-100 truncate max-w-[120px] sm:max-w-none">
-              {activeTab === 'visualize' ? 'Graph' : activeTab === 'tree' ? 'Tree' : 'Formatter'}
-            </h1>
+        <header className="h-14 border-b border-zinc-200 dark:border-zinc-900 flex items-center justify-between px-2 lg:px-6 bg-white dark:bg-zinc-950 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <a href={slug ? `/share/${slug}` : '/'} className="flex items-center hover:opacity-80 transition-opacity" title="Refresh Page">
+              <img src="/jsonrock-dark.svg" alt="JSONROCK" className="h-5 sm:h-6 w-auto dark:hidden block" />
+              <img src="/jsonrock-light.svg" alt="JSONROCK" className="h-5 sm:h-6 w-auto hidden dark:block" />
+            </a>
             {!isValid && (
               <span className="px-2 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] sm:text-xs font-medium whitespace-nowrap">
                 Invalid
@@ -618,7 +623,7 @@ export default function Home({ initialRecord }: HomeProps) {
             )}
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-1.5 sm:gap-4">
             {/* Upload Button */}
             <button
               onClick={() => setIsUploadOpen(true)}
@@ -626,7 +631,7 @@ export default function Home({ initialRecord }: HomeProps) {
               title="Upload JSON"
             >
               <UploadCloud size={14} />
-              <span className="hidden sm:inline">Upload</span>
+              <span className="hidden lg:inline">Upload</span>
             </button>
 
             {/* New Button */}
@@ -636,7 +641,7 @@ export default function Home({ initialRecord }: HomeProps) {
               title="Create New"
             >
               <FolderPlus size={14} />
-              <span className="hidden sm:inline">New</span>
+              <span className="hidden lg:inline">New</span>
             </button>
 
             {/* Save Button */}
@@ -651,7 +656,7 @@ export default function Home({ initialRecord }: HomeProps) {
               )}
             >
               <Save size={14} />
-              <span className="hidden sm:inline">{isSaving ? "Saving..." : "Save"}</span>
+              <span className="hidden lg:inline">{isSaving ? "Saving..." : "Save"}</span>
             </button>
 
             <button
@@ -661,25 +666,25 @@ export default function Home({ initialRecord }: HomeProps) {
               )}
             >
               <LinkIcon size={14} />
-              <span className="hidden sm:inline">Share</span>
+              <span className="hidden lg:inline">Share</span>
             </button>
 
-            {/* Header Icons: Github & Theme */}
-            <div className="hidden sm:flex items-center">
-              <a
-                href="https://github.com/Softcolon-Technology/jsonrock"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors flex items-center justify-center"
-                title="View Source on GitHub"
-              >
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                  <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
-                </svg>
-              </a>
+            <div className="h-6 w-px bg-zinc-200 dark:bg-zinc-800 mx-0.5 sm:mx-1" />
 
-              <ThemeToggle />
-            </div>
+            {/* Header Icons: Github */}
+            <a
+              href="https://github.com/Softcolon-Technology/jsonrock"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1.5 sm:p-2 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors flex items-center justify-center"
+              title="View Source on GitHub"
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
+            </a>
+
+            <ThemeToggle />
           </div>
         </header>
 
@@ -888,7 +893,7 @@ export default function Home({ initialRecord }: HomeProps) {
                       </button>
                     </div>
                     <div className="flex-1 ml-16">
-                      <JsonEditor defaultValue={formattedOutput} remoteValue={formattedOutput} onChange={() => { }} readOnly={true} className="rounded-none border-0 shadow-none" />
+                      <JsonEditor defaultValue={formattedOutput} remoteValue={{ code: formattedOutput, nonce: 0 }} onChange={() => { }} readOnly={true} className="rounded-none border-0 shadow-none" />
                     </div>
                   </div>
                 )}

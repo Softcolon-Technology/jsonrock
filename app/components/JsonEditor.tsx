@@ -4,7 +4,7 @@ import { editor } from "monaco-editor";
 
 interface JsonEditorProps {
     defaultValue?: string;
-    remoteValue?: string | null;
+    remoteValue?: { code: string; nonce: number } | null;
     onChange: (value: string | undefined) => void;
     readOnly?: boolean;
     className?: string;
@@ -13,8 +13,6 @@ interface JsonEditorProps {
 
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
-
-// ...
 
 const JsonEditor: React.FC<JsonEditorProps> = ({ defaultValue, remoteValue, onChange, readOnly = false, className, options: customOptions }) => {
     const { theme } = useTheme();
@@ -63,15 +61,15 @@ const JsonEditor: React.FC<JsonEditorProps> = ({ defaultValue, remoteValue, onCh
 
     // React to remote value changes (Socket or Formatter)
     React.useEffect(() => {
-        if (remoteValue !== undefined && remoteValue !== null && editorRef.current) {
+        if (remoteValue && editorRef.current) {
             const currentValue = editorRef.current.getValue();
-            if (currentValue !== remoteValue) {
+            if (currentValue !== remoteValue.code) {
                 // Set flag to ignore the subsequent onChange trigger
                 isRemoteUpdate.current = true;
 
                 // We use executeEdits to preserve undo stack if possible, or setValue for full replace
                 // For formatter, setValue is usually cleaner as it's a full transform
-                editorRef.current.setValue(remoteValue);
+                editorRef.current.setValue(remoteValue.code);
 
                 // Reset flag immediately (synchronous)
                 isRemoteUpdate.current = false;
@@ -104,6 +102,15 @@ const JsonEditor: React.FC<JsonEditorProps> = ({ defaultValue, remoteValue, onCh
                     readOnly,
                     fontFamily: "Geist Mono, monospace",
                     padding: { top: 16, bottom: 16 },
+                    scrollbar: {
+                        vertical: 'visible',
+                        horizontal: 'auto',
+                        useShadows: false,
+                        verticalScrollbarSize: 10,
+                        horizontalScrollbarSize: 10,
+                        verticalHasArrows: false,
+                        horizontalHasArrows: false,
+                    },
                     ...customOptions
                 }}
                 onMount={handleEditorDidMount}

@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "JSONROCK",
+  title: "JsonRock",
   description: "Visualize, Format, Validate and Share your JSON data instantly. Features include Graph View, Tree View, and secure sharing.",
 };
 
