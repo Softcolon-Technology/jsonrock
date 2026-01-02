@@ -452,6 +452,13 @@ export default function Home({ initialRecord }: HomeProps) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 5 * 1024 * 1024) {
+      showAlert("Upload Failed", "File size exceeds the 5MB limit.", "error");
+      e.target.value = ""; // Reset input
+      setIsUploadOpen(false);
+      return;
+    }
+
     setIsUploading(true);
     const formData = new FormData();
     formData.append("file", file);
