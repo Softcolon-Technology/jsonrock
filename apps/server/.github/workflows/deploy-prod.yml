@@ -1,0 +1,37 @@
+name: Node.js CI/CD for Main Branch [Jsonrock Backend Softcolon]
+
+on:
+  push:
+    branches: ['main']
+
+jobs:
+  build:
+    runs-on: be-jsonrock prod
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Add Environment Variables
+        run: cp /home/ankit/projects/be-jsonrock/.env .env
+
+      - name: Install Dependencies
+        run: pnpm install
+        working-directory: softcolon
+
+      - name: Build Application
+        run: pnpm run build --filter=server
+        working-directory: softcolon
+
+      - name: Restart Server App only (PM2)
+        run: pm2 restart be-jsonrock-prod
+        working-directory: softcolon/apps/server

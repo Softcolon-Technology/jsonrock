@@ -1,0 +1,411 @@
+@import "tailwindcss";
+@variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --primary: #00b3b7;
+  --paragraph: #64748b;
+  --heading: #1a1d1b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-paragraph: var(--paragraph);
+  --color-heading: var(--heading);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-space-grotesk: var(--font-space-grotesk);
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* Neubrutalist Card Styles */
+.neubrutalist-card {
+  background: white;
+  border: 2px solid var(--heading); /* #1A1D1B */
+  box-shadow: 8px 8px 0px 0px var(--heading);
+  transition: all 0.2s ease;
+}
+
+.neubrutalist-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 12px 12px 0px 0px var(--primary); /* #00B3B7 */
+}
+
+.card-inner-grid {
+  background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  /* font-family: Arial, Helvetica, sans-serif; */
+  font-family: var(--font-space-grotesk);
+}
+
+/* === Global Scrollbar Styling === */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #e4e4e7;
+  /* zinc-200 */
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #d4d4d8;
+  /* zinc-300 */
+}
+
+/* Dark Mode Scrollbars */
+.dark ::-webkit-scrollbar-thumb {
+  background: #27272a;
+  /* zinc-800 */
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: #3f3f46;
+  /* zinc-700 */
+}
+
+/* === Monaco Editor Scrollbar Overrides === */
+/* Force Monaco to use our transparent track and rounded thumb look */
+
+/* Hide the default Monaco track background */
+.monaco-editor .scrollbar,
+.monaco-editor .scrollbar .slider {
+  background: transparent !important;
+  border-radius: 9999px !important;
+  box-shadow: none !important;
+}
+
+/* Enforce Track Dimensions */
+.monaco-editor .scrollbar.vertical {
+  width: 10px !important;
+}
+
+.monaco-editor .scrollbar.horizontal {
+  height: 10px !important;
+}
+
+/* Common Slider Styles (Colors & Borders) */
+.monaco-editor .scrollbar .slider {
+  background: #e4e4e7 !important;
+  /* zinc-200 */
+  border: 2px solid transparent !important;
+  background-clip: content-box !important;
+  border-radius: 9999px !important;
+}
+
+/* Vertical Scrollbar Specifics */
+.monaco-editor .scrollbar.vertical .slider {
+  width: 10px !important;
+  left: 0 !important;
+}
+
+/* Horizontal Scrollbar Specifics */
+.monaco-editor .scrollbar.horizontal .slider {
+  height: 10px !important;
+  top: 0 !important;
+}
+
+/* Hover state for Monaco slider */
+.monaco-editor .scrollbar .slider:hover {
+  background-color: #d4d4d8 !important;
+  /* zinc-300 */
+  border: 2px solid transparent !important;
+  background-clip: content-box !important;
+}
+
+/* Dark Mode Monaco Overrides */
+.dark .monaco-editor .scrollbar .slider {
+  background: #27272a !important;
+  /* zinc-800 */
+  border: 2px solid transparent !important;
+  background-clip: content-box !important;
+}
+
+.dark .monaco-editor .scrollbar .slider:hover {
+  background-color: #3f3f46 !important;
+  /* zinc-700 */
+  border: 2px solid transparent !important;
+  background-clip: content-box !important;
+}
+
+/* Invisible Scrollbar Decorator */
+.monaco-editor .decorationsOverviewRuler {
+  display: none !important;
+  /* Optional: hide the minimap ruler if distracting */
+}
+
+/* === Rich Text Editor Heading Overrides === */
+/* Force specific pixel sizes requested by user */
+.ProseMirror h1 {
+  font-size: 32px;
+  line-height: 1.2;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 800;
+}
+
+.ProseMirror h2 {
+  font-size: 24px;
+  line-height: 1.3;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 700;
+}
+
+.ProseMirror h3 {
+  font-size: 18.72px;
+  line-height: 1.4;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+
+.ProseMirror h4 {
+  font-size: 16px;
+  line-height: 1.5;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+
+.ProseMirror h5 {
+  font-size: 13.28px;
+  line-height: 1.5;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+
+.ProseMirror h6 {
+  font-size: 10.72px;
+  line-height: 1.5;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+
+/* === Pagination Page Break Styling === */
+.page-break-inside {
+  pointer-events: none;
+  user-select: none;
+}
+
+.page-break-widget {
+  pointer-events: none;
+  user-select: none;
+  display: block;
+  width: 100%;
+  /* Creates visual gap between page content */
+}
+
+/* Code blocks with scrollable content - use !important to override Tailwind */
+.page-code-block,
+.ProseMirror pre,
+.editor-page pre,
+pre[class*="bg-zinc"] {
+  position: relative !important;
+  display: block !important;
+  /* Flex behavior for expanding in remaining space */
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  /* Allow flex item to shrink below content size */
+  max-height: 100% !important;
+  /* Ensure it doesn't overflow parent */
+  max-width: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  white-space: pre !important;
+  /* Scrollbar styling - transparent track, subtle thumb */
+  scrollbar-width: thin;
+  scrollbar-color: #d4d4d8 transparent;
+}
+
+/* Rich Text Editor List Styling */
+.ProseMirror li {
+  /* Ensure the list item itself handles font size for the marker */
+  transition: font-size 0.1s ease;
+}
+
+.ProseMirror li::marker {
+  /* Explicitly inherit font size */
+  font-size: inherit;
+  color: inherit;
+}
+
+/* Ensure markers aren't clipped */
+.ProseMirror ul,
+.ProseMirror ol {
+  padding-left: 3rem !important;
+  /* Increased to 3rem for safety */
+  overflow: visible !important;
+}
+
+.page-code-block::-webkit-scrollbar,
+.ProseMirror pre::-webkit-scrollbar,
+.editor-page pre::-webkit-scrollbar,
+pre[class*="bg-zinc"]::-webkit-scrollbar {
+  width: 8px !important;
+  height: 8px !important;
+  background-color: transparent !important;
+}
+
+.page-code-block::-webkit-scrollbar-track,
+.ProseMirror pre::-webkit-scrollbar-track,
+.editor-page pre::-webkit-scrollbar-track,
+pre[class*="bg-zinc"]::-webkit-scrollbar-track {
+  background-color: transparent !important;
+  border-radius: 4px;
+}
+
+.page-code-block::-webkit-scrollbar-thumb,
+.ProseMirror pre::-webkit-scrollbar-thumb,
+.editor-page pre::-webkit-scrollbar-thumb,
+pre[class*="bg-zinc"]::-webkit-scrollbar-thumb {
+  background-color: #d4d4d8 !important;
+  border-radius: 4px;
+}
+
+.page-code-block::-webkit-scrollbar-thumb:hover,
+.ProseMirror pre::-webkit-scrollbar-thumb:hover,
+.editor-page pre::-webkit-scrollbar-thumb:hover,
+pre[class*="bg-zinc"]::-webkit-scrollbar-thumb:hover {
+  background-color: #a1a1aa !important;
+}
+
+/* Scrollbar corner - where horizontal and vertical meet */
+.page-code-block::-webkit-scrollbar-corner,
+.ProseMirror pre::-webkit-scrollbar-corner,
+.editor-page pre::-webkit-scrollbar-corner,
+pre[class*="bg-zinc"]::-webkit-scrollbar-corner {
+  background-color: transparent !important;
+}
+
+/* Dark mode scrollbar colors */
+.dark .page-code-block,
+.dark .ProseMirror pre,
+.dark .editor-page pre,
+.dark pre[class*="bg-zinc"] {
+  scrollbar-color: #52525b transparent;
+}
+
+.dark .page-code-block::-webkit-scrollbar,
+.dark .ProseMirror pre::-webkit-scrollbar,
+.dark .editor-page pre::-webkit-scrollbar,
+.dark pre[class*="bg-zinc"]::-webkit-scrollbar {
+  background-color: transparent !important;
+}
+
+.dark .page-code-block::-webkit-scrollbar-track,
+.dark .ProseMirror pre::-webkit-scrollbar-track,
+.dark .editor-page pre::-webkit-scrollbar-track,
+.dark pre[class*="bg-zinc"]::-webkit-scrollbar-track {
+  background-color: transparent !important;
+}
+
+.dark .page-code-block::-webkit-scrollbar-thumb,
+.dark .ProseMirror pre::-webkit-scrollbar-thumb,
+.dark .editor-page pre::-webkit-scrollbar-thumb,
+.dark pre[class*="bg-zinc"]::-webkit-scrollbar-thumb {
+  background-color: #52525b !important;
+}
+
+.dark .page-code-block::-webkit-scrollbar-thumb:hover,
+.dark .ProseMirror pre::-webkit-scrollbar-thumb:hover,
+.dark .editor-page pre::-webkit-scrollbar-thumb:hover,
+.dark pre[class*="bg-zinc"]::-webkit-scrollbar-thumb:hover {
+  background-color: #71717a !important;
+}
+
+.dark .page-code-block::-webkit-scrollbar-corner,
+.dark .ProseMirror pre::-webkit-scrollbar-corner,
+.dark .editor-page pre::-webkit-scrollbar-corner,
+.dark pre[class*="bg-zinc"]::-webkit-scrollbar-corner {
+  background-color: transparent !important;
+}
+
+.page-code-block code,
+.ProseMirror pre code,
+.editor-page pre code {
+  display: block;
+  white-space: pre;
+  word-wrap: normal;
+}
+
+/* Ensure consistent text editor layout */
+.ProseMirror {
+  box-sizing: border-box;
+}
+
+/* === Page Container Styling === */
+.editor-page {
+  position: relative;
+  box-sizing: border-box;
+  background: white;
+}
+
+.dark .editor-page {
+  background: #09090b;
+}
+
+.page-content {
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* Page gap visual indicator */
+.editor-page::after {
+  content: "";
+  position: absolute;
+  bottom: -20px;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.02) 20%,
+    rgba(0, 0, 0, 0.05) 50%,
+    rgba(0, 0, 0, 0.02) 80%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+.dark .editor-page::after {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(255, 255, 255, 0.02) 20%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(255, 255, 255, 0.02) 80%,
+    transparent 100%
+  );
+}
