@@ -108,9 +108,6 @@ importers:
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.55.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      '@repo/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       '@tiptap/core':
         specifier: ^3.19.0
         version: 3.20.0(@tiptap/pm@3.20.0)
@@ -168,6 +165,9 @@ importers:
       framer-motion:
         specifier: ^12.31.0
         version: 12.34.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      i:
+        specifier: ^0.3.7
+        version: 0.3.7
       js-cookie:
         specifier: ^3.0.5
         version: 3.0.5
@@ -205,9 +205,6 @@ importers:
         specifier: ^3.4.0
         version: 3.5.0
     devDependencies:
-      '@repo/eslint-config':
-        specifier: workspace:*
-        version: link:../../packages/eslint-config
       '@repo/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
@@ -223,18 +220,12 @@ importers:
       '@types/react-dom':
         specifier: ^19
         version: 19.2.2(@types/react@19.2.2)
-      autoprefixer:
-        specifier: ^10.4.20
-        version: 10.4.24(postcss@8.5.6)
       eslint:
         specifier: ^9
         version: 9.39.1(jiti@2.6.1)
       eslint-config-next:
         specifier: 16.1.1
         version: 16.1.1(eslint@9.39.1(jiti@2.6.1))(typescript@5.9.2)
-      postcss:
-        specifier: ^8.4.49
-        version: 8.5.6
       tailwindcss:
         specifier: ^4
         version: 4.2.1
@@ -1644,13 +1635,6 @@ packages:
   async@3.2.6:
     resolution: {integrity: sha512-htCUDlxyyCLMgaM3xXg0C0LW2xqfuQ6p05pCEIsXuyQ+a1koYKTuBMzRNwmybfLgvJDMd0r1LTn4+E0Ti6C2AA==}
 
-  autoprefixer@10.4.24:
-    resolution: {integrity: sha512-uHZg7N9ULTVbutaIsDRoUkoS8/h3bdsmVJYZ5l3wv8Cp/6UIIoRDm90hZ+BwxUj/hGBEzLxdHNSKuFpn8WOyZw==}
-    engines: {node: ^10 || ^12 || >=14}
-    hasBin: true
-    peerDependencies:
-      postcss: ^8.1.0
-
   available-typed-arrays@1.0.7:
     resolution: {integrity: sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ==}
     engines: {node: '>= 0.4'}
@@ -2351,9 +2335,6 @@ packages:
     resolution: {integrity: sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==}
     engines: {node: '>= 0.6'}
 
-  fraction.js@5.3.4:
-    resolution: {integrity: sha512-1X1NTtiJphryn/uLQz3whtY6jK3fTqoE3ohKs0tT+Ujr1W59oopxmoEh7Lu5p6vBaPbgoM0bzveAW4Qi5RyWDQ==}
-
   framer-motion@12.34.3:
     resolution: {integrity: sha512-v81ecyZKYO/DfpTwHivqkxSUBzvceOpoI+wLfgCgoUIKxlFKEXdg0oR9imxwXumT4SFy8vRk9xzJ5l3/Du/55Q==}
     peerDependencies:
@@ -2507,6 +2488,10 @@ packages:
     resolution: {integrity: sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA==}
     engines: {node: '>=18'}
     hasBin: true
+
+  i@0.3.7:
+    resolution: {integrity: sha512-FYz4wlXgkQwIPqhzC5TdNMLSE5+GS1IIDJZY/1ZiEPCT2S3COUVZeT5OW4BmW4r5LHLQuOosSwsvnroG9GR59Q==}
+    engines: {node: '>=0.4'}
 
   iconv-lite@0.7.2:
     resolution: {integrity: sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==}
@@ -3324,9 +3309,6 @@ packages:
   possible-typed-array-names@1.1.0:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
     engines: {node: '>= 0.4'}
-
-  postcss-value-parser@4.2.0:
-    resolution: {integrity: sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ==}
 
   postcss@8.4.31:
     resolution: {integrity: sha512-PS08Iboia9mts/2ygV3eLpY5ghnUcfLV/EXTOW1E2qYxJKGGBUtNjN76FYHnMs36RmARn41bC0AZmn+rR0OVpQ==}
@@ -5552,15 +5534,6 @@ snapshots:
 
   async@3.2.6: {}
 
-  autoprefixer@10.4.24(postcss@8.5.6):
-    dependencies:
-      browserslist: 4.28.1
-      caniuse-lite: 1.0.30001774
-      fraction.js: 5.3.4
-      picocolors: 1.1.1
-      postcss: 8.5.6
-      postcss-value-parser: 4.2.0
-
   available-typed-arrays@1.0.7:
     dependencies:
       possible-typed-array-names: 1.1.0
@@ -6455,8 +6428,6 @@ snapshots:
 
   forwarded@0.2.0: {}
 
-  fraction.js@5.3.4: {}
-
   framer-motion@12.34.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
     dependencies:
       motion-dom: 12.34.3
@@ -6594,6 +6565,8 @@ snapshots:
   human-signals@5.0.0: {}
 
   husky@9.1.7: {}
+
+  i@0.3.7: {}
 
   iconv-lite@0.7.2:
     dependencies:
@@ -7334,8 +7307,6 @@ snapshots:
   pidtree@0.6.0: {}
 
   possible-typed-array-names@1.1.0: {}
-
-  postcss-value-parser@4.2.0: {}
 
   postcss@8.4.31:
     dependencies:

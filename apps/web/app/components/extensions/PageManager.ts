@@ -100,7 +100,6 @@ export const PageManager = Extension.create<PageManagerOptions>({
                 if (firstOverflowIndex < 0) continue
 
                 // Find the page node in document
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ProseMirror node type
                 let targetPageNode: any = null
                 let targetPagePos = 0
                 let currentPageIndex = 0
@@ -124,7 +123,6 @@ export const PageManager = Extension.create<PageManagerOptions>({
                 }
 
                 // Collect ALL content from firstOverflowIndex to end
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ProseMirror node array
                 const contentToMove: any[] = []
                 for (
                   let i = firstOverflowIndex;
@@ -150,7 +148,6 @@ export const PageManager = Extension.create<PageManagerOptions>({
                   const nextPageIndex = pageIndex + 1
                   let nextPageExists = false
                   let nextPagePos = 0
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ProseMirror node type
                   let nextPageNode: any = null
                   let currentIdx = 0
 
@@ -178,8 +175,9 @@ export const PageManager = Extension.create<PageManagerOptions>({
                     contentToMove.forEach((node, idx) => {
                       tr.insert(adjustedInsertPos + idx, node)
                     })
-                  } else if (schema.nodes.page) {
+                  } else {
                     // Create new page with moved content
+                    if (!schema.nodes.page) continue
                     const newPage = schema.nodes.page.create(
                       null,
                       contentToMove

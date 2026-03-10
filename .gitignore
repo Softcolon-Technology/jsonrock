@@ -21,6 +21,9 @@ coverage
 /apps/web/.turbo
 /apps/server/.turbo
 
+# log files
+/apps/server/logs
+
 # Vercel
 .vercel
 

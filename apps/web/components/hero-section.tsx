@@ -1,5 +1,6 @@
 'use client'
 
+import { motion } from 'framer-motion'
 import Image from 'next/image'
 import { LeftHeroAnimation, RightHeroAnimation } from './hero-animations'
 
@@ -47,7 +48,7 @@ export default function HeroSection() {
             <RightHeroAnimation />
             <div className='blur-[97px] z-[-10] bg-[#00B3B7] w-[80%] md:w-[85%] aspect-[2.77/1] absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'></div>
             <Image
-              src='/hero-gif.gif'
+              src='/hero3.gif'
               alt='JSONRock Editor Interface'
               width={0}
               height={0}

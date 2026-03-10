@@ -14,7 +14,7 @@ export function getJsonParseError(json: string, error: SyntaxError): JsonError {
   // V8 (Chrome/Node) error often format: "Unexpected token X in JSON at position Y"
   const positionMatch = message.match(/at position (\d+)/)
 
-  if (positionMatch?.[1]) {
+  if (positionMatch && positionMatch[1]) {
     const position = parseInt(positionMatch[1], 10)
     // Calculate line number by counting newlines up to position
     const substring = json.substring(0, position)
@@ -22,7 +22,7 @@ export function getJsonParseError(json: string, error: SyntaxError): JsonError {
   } else {
     // Fallback: regex search for line number if format is different (e.g. Firefox sometimes)
     const lineMatch = message.match(/line (\d+)/)
-    if (lineMatch?.[1]) {
+    if (lineMatch && lineMatch[1]) {
       line = parseInt(lineMatch[1], 10)
     }
   }

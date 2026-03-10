@@ -1,12 +1,13 @@
 import React from 'react'
 import { X, Copy, Check } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import JsonEditor from './JsonEditor'
 
 interface NodeModalProps {
   isOpen: boolean
   onClose: () => void
   data: {
-    content: unknown
+    content: any
     path: string
   }
 }

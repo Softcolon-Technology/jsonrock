@@ -1,7 +1,5 @@
 'use client'
 
-/* eslint-disable react-hooks/exhaustive-deps -- dependency arrays intentionally minimal to avoid re-fetch loops */
-
 import React, { useCallback, useEffect, useState } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { Edge, Node } from 'reactflow'
@@ -60,10 +58,7 @@ export interface ShareLinkRecord {
   updatedAt: Date
 }
 
-export type SerializedShareLinkRecord = Omit<
-  ShareLinkRecord,
-  'createdAt' | '_id'
-> & {
+type SerializedShareLinkRecord = Omit<ShareLinkRecord, 'createdAt' | '_id'> & {
   createdAt: string
   _id?: string
   accessType?: ShareAccessType
@@ -104,7 +99,7 @@ export default function Home({
     initialRecord?.json || currentJsonContent
   )
 
-  const [parsedJsonData, setParsedJsonData] = useState<unknown>(null)
+  const [parsedJsonData, setParsedJsonData] = useState<any>(null)
   const [isEditorReady, setIsEditorReady] = useState(false)
   const [graphNodes, setGraphNodes] = useState<Node[]>([])
   const [graphEdges, setGraphEdges] = useState<Edge[]>([])
@@ -123,7 +118,19 @@ export default function Home({
   const [jsonValidationError, setJsonValidationError] = useState<{
     message: string
     line?: number
+    severity?: 'error' | 'warning'
   } | null>(null)
+
+  const [monacoValidationError, setMonacoValidationError] = useState<{
+    message: string
+    line?: number
+    severity?: 'error' | 'warning'
+  } | null>(null)
+
+  const effectiveValidationError = jsonValidationError || monacoValidationError
+  const isDocValid =
+    isJsonValid &&
+    (!monacoValidationError || monacoValidationError.severity !== 'error')
 
   // Split state:
   // 1. currentJsonContent = Source of Truth for Saving/Graph (Updated by local typing)
@@ -182,22 +189,21 @@ export default function Home({
   // Sync state when URL slug changes (Navigation / Refresh)
 
   const syncFromData = useCallback(
-    (data: SerializedShareLinkRecord & { data?: unknown }) => {
+    (data: any) => {
       let content = ''
       // Handle new API structure { data: ..., type: ... }
       if (data.type === 'json' && typeof data.data === 'object') {
         content = JSON.stringify(data.data, null, 2)
       } else {
         // Fallback or Text mode
-        const raw = data.data ?? data.json
-        content = typeof raw === 'string' ? raw : ''
+        content = data.data || data.json || ''
       }
 
       setCurrentJsonContent(content)
       setDocumentSlug(data.slug || null)
       setIsDocumentPrivate(data.isPrivate || false)
       setUserAccessLevel(data.accessType || 'viewer')
-      setDocumentType((data.type as ShareType) || 'json')
+      setDocumentType(data.type || 'json')
       // URL param (?view=) takes priority over DB stored mode — it's the explicit user intent
       setCurrentViewMode(paramView || data.mode || 'visualize')
       setSyncedRemoteContent({ code: content, nonce: Date.now() })
@@ -310,13 +316,14 @@ export default function Home({
     if (owned) {
       try {
         slugs = JSON.parse(owned)
-      } catch {
-        // ignore parse error
-      }
+      } catch (e) {}
     }
     if (!slugs.includes(newSlug)) {
       slugs.push(newSlug)
-      Cookies.set('json-cracker-owned', JSON.stringify(slugs), { expires: 30 }) // 30 days
+      Cookies.set('json-cracker-owned', JSON.stringify(slugs), {
+        expires: 30,
+        path: '/',
+      }) // 30 days
     }
     setIsCurrentUserOwner(true)
   }
@@ -475,9 +482,7 @@ export default function Home({
             setIsCurrentUserOwner(true)
             setHasEditPermission(true)
           }
-        } catch {
-          // ignore parse error
-        }
+        } catch (e) {}
       }
 
       setIsPrivacyLocked(data.isPrivate)
@@ -536,15 +541,22 @@ export default function Home({
       if (data.slug) {
         setDocumentSlug(data.slug)
         setUserAccessLevel(data.accessType || 'editor')
-        setHasEditPermission(true) // Implicitly editor of new file
+        setHasEditPermission(true)
         setIsCurrentUserOwner(true)
         setDocumentType(data.type || targetType)
         addOwnership(data.slug)
+
         const route =
           (data.type || targetType) === 'text' ? '/editor/text/' : '/editor/'
-        // Add default view parameter for proper navigation
         const viewParam = targetType === 'text' ? '' : '?view=formatter'
-        router.push(`${route}${data.slug}${viewParam}`)
+        const newUrl = `${route}${data.slug}${viewParam}`
+
+        // Use pushState to update URL without refresh
+        window.history.pushState(
+          { ...window.history.state, as: newUrl, url: newUrl },
+          '',
+          newUrl
+        )
       }
     } catch (e) {
       console.error('Failed to create new record', e)
@@ -667,6 +679,17 @@ export default function Home({
     const file = e.target.files?.[0]
     if (!file) return
 
+    if (file.type !== 'application/json' && !file.name.endsWith('.json')) {
+      triggerAlert(
+        'Upload Failed',
+        'Please select a valid .json file.',
+        'error'
+      )
+      e.target.value = '' // Reset input
+      setIsUploadModalOpen(false)
+      return
+    }
+
     if (file.size > 2 * 1024 * 1024) {
       triggerAlert('Upload Failed', 'File size exceeds the 2MB limit.', 'error')
       e.target.value = '' // Reset input
@@ -675,6 +698,10 @@ export default function Home({
     }
 
     setIsFileUploading(true)
+
+    // Read the file content locally before uploading (so we can display it without backend returning it)
+    const fileContent = await file.text()
+
     const formData = new FormData()
     formData.append('file', file)
 
@@ -689,10 +716,26 @@ export default function Home({
         throw new Error(data.error || 'Upload failed')
       }
 
-      // Success - Redirect
-      setCurrentViewMode('formatter') // Set view mode to match URL parameter
+      // Success - Update state locally and change URL in-place
+      setCurrentViewMode('formatter')
+      setDocumentType('json')
+      setDocumentSlug(data.slug)
       addOwnership(data.slug)
-      router.push(`/editor/${data.slug}?view=formatter`)
+
+      const newUrl = `/editor/${data.slug}?view=formatter`
+      window.history.pushState(
+        { ...window.history.state, as: newUrl, url: newUrl },
+        '',
+        newUrl
+      )
+
+      // Update the editor with the locally-read file content (no backend change needed)
+      setCurrentJsonContent(fileContent)
+      setSyncedRemoteContent({ code: fileContent, nonce: Date.now() })
+      lastPersistedContentRef.current = fileContent
+
+      setIsUploadModalOpen(false)
+      setIsFileUploading(false)
     } catch (error) {
       console.error(error)
       triggerAlert('Upload Failed', (error as Error).message, 'error')
@@ -747,9 +790,18 @@ export default function Home({
       if (newSlug !== documentSlug) {
         setDocumentSlug(newSlug)
         addOwnership(newSlug) // Mark as owner of new/updated slug
+
         const route = documentType === 'text' ? '/editor/text/' : '/editor/'
-        const viewParam = documentType === 'text' ? '' : '?view=formatter'
-        router.push(`${route}${newSlug}${viewParam}`)
+        const viewParam =
+          documentType === 'text' ? '' : `?view=${currentViewMode}`
+        const newUrl = `${route}${newSlug}${viewParam}`
+
+        // Update URL in-place
+        window.history.pushState(
+          { ...window.history.state, as: newUrl, url: newUrl },
+          '',
+          newUrl
+        )
       }
 
       // Update local state
@@ -822,6 +874,22 @@ export default function Home({
     }
   }, [debouncedJsonContent, currentViewMode])
 
+  const handleEditorValidation = useCallback((markers: any[]) => {
+    // Monaco MarkerSeverity: 8 = Error, 4 = Warning
+    const issues = markers.filter((m) => m.severity >= 4)
+    if (issues.length > 0) {
+      // Sort so errors (8) come before warnings (4)
+      const highestIssue = issues.sort((a, b) => b.severity - a.severity)[0]
+      setMonacoValidationError({
+        message: highestIssue.message,
+        line: highestIssue.startLineNumber,
+        severity: highestIssue.severity >= 8 ? 'error' : 'warning',
+      })
+    } else {
+      setMonacoValidationError(null)
+    }
+  }, [])
+
   // Debounce for Auto-Save (2 seconds)
   const debouncedContentForAutoSave = useDebounce(currentJsonContent, 2000)
 
@@ -876,11 +944,17 @@ export default function Home({
             setDocumentType(data.type || targetType)
             addOwnership(data.slug)
             lastPersistedContentRef.current = debouncedContentForAutoSave
-            // Use the current view mode the user is already in (don't force a switch)
+
             const route = isText ? '/editor/text/' : '/editor/'
             const viewParam = isText ? '' : `?view=${currentViewMode}`
-            // Use replace instead of push for smooth navigation (no hard refresh feel)
-            router.replace(`${route}${data.slug}${viewParam}`)
+            const newUrl = `${route}${data.slug}${viewParam}`
+
+            // Use replaceState for silent background URL update
+            window.history.replaceState(
+              { ...window.history.state, as: newUrl, url: newUrl },
+              '',
+              newUrl
+            )
           }
         })
         .catch((e) => console.error('Auto-create failed', e))
@@ -982,37 +1056,79 @@ export default function Home({
                     remoteValue={syncedRemoteContent} // Updates Only
                     onChange={onJsonContentChange}
                     onReady={() => setIsEditorReady(true)}
+                    onValidate={handleEditorValidation}
                     readOnly={!hasEditPermission}
                     options={{
                       padding: { top: 16, bottom: 100 }, // Ensure last lines are visible above floating alert
                     }}
                   />
 
-                  {/* Error Alert Overlay */}
-                  {!isJsonValid && jsonValidationError && (
-                    <div className='absolute bottom-4 left-4 right-4 lg:bottom-6 lg:left-8 lg:right-8 z-30 animate-in fade-in slide-in-from-bottom-2'>
-                      <div className='bg-white/95 dark:bg-zinc-900/95 border border-red-200 dark:border-red-900/50 backdrop-blur-md p-3 lg:p-4 rounded-xl shadow-xl flex items-start gap-3 lg:gap-4 ring-1 ring-black/5 dark:ring-white/5'>
-                        <div className='p-1.5 lg:p-2 bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-900/30 rounded-lg text-red-600 dark:text-red-500 shrink-0 shadow-sm'>
-                          <AlertCircle className='w-4 h-4 lg:w-5 lg:h-5' />
-                        </div>
-                        <div className='flex-1 min-w-0'>
-                          <div className='flex items-center justify-between gap-2 lg:gap-4'>
-                            <h4 className='text-xs lg:text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2'>
-                              Invalid JSON
-                            </h4>
-                            {jsonValidationError.line && (
-                              <span className='text-[10px] font-mono font-bold text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900/50 px-1.5 lg:px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm'>
-                                Line {jsonValidationError.line}
-                              </span>
+                  {/* Error / Warning Alert Overlay */}
+                  {effectiveValidationError &&
+                    (!isDocValid ||
+                      effectiveValidationError.severity === 'warning') && (
+                      <div className='absolute bottom-4 left-4 right-4 lg:bottom-6 lg:left-8 lg:right-8 z-30 animate-in fade-in slide-in-from-bottom-2'>
+                        <div
+                          className={cn(
+                            'bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md p-3 lg:p-4 rounded-xl shadow-xl flex items-start gap-3 lg:gap-4 ring-1 ring-black/5 dark:ring-white/5 border',
+                            effectiveValidationError.severity === 'warning'
+                              ? 'border-amber-400 dark:border-amber-600/50'
+                              : 'border-red-200 dark:border-red-900/50'
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              'p-1.5 lg:p-2 rounded-lg shrink-0 shadow-sm border',
+                              effectiveValidationError.severity === 'warning'
+                                ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/30 text-amber-600 dark:text-amber-500'
+                                : 'bg-red-50 dark:bg-red-950/30 border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-500'
                             )}
+                          >
+                            <AlertCircle className='w-4 h-4 lg:w-5 lg:h-5' />
                           </div>
-                          <p className='text-[11px] lg:text-xs text-zinc-600 dark:text-zinc-400 mt-1 lg:mt-1.5 font-mono break-words leading-relaxed border-l-2 border-red-200 dark:border-red-900/50 pl-2 lg:pl-3'>
-                            {jsonValidationError.message}
-                          </p>
+                          <div className='flex-1 min-w-0'>
+                            <div className='flex items-center justify-between gap-2 lg:gap-4'>
+                              <h4
+                                className={cn(
+                                  'text-xs lg:text-sm font-bold flex items-center gap-2',
+                                  effectiveValidationError.severity ===
+                                    'warning'
+                                    ? 'text-amber-800 dark:text-amber-400'
+                                    : 'text-zinc-900 dark:text-zinc-100'
+                                )}
+                              >
+                                {effectiveValidationError.severity === 'warning'
+                                  ? 'Warning'
+                                  : 'Invalid JSON'}
+                              </h4>
+                              {effectiveValidationError.line && (
+                                <span
+                                  className={cn(
+                                    'text-[10px] font-mono font-bold px-1.5 lg:px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm border',
+                                    effectiveValidationError.severity ===
+                                      'warning'
+                                      ? 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-900/50'
+                                      : 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-900/50'
+                                  )}
+                                >
+                                  Line {effectiveValidationError.line}
+                                </span>
+                              )}
+                            </div>
+                            <p
+                              className={cn(
+                                'text-[11px] lg:text-xs mt-1 lg:mt-1.5 font-mono break-words leading-relaxed border-l-2 pl-2 lg:pl-3',
+                                effectiveValidationError.severity === 'warning'
+                                  ? 'text-amber-700 dark:text-amber-400/80 border-amber-300 dark:border-amber-700/50'
+                                  : 'text-zinc-600 dark:text-zinc-400 border-red-200 dark:border-red-900/50'
+                              )}
+                            >
+                              {effectiveValidationError.message}
+                            </p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
                   {/* Go to View Button (Mobile Only) */}
                   <div className='lg:hidden absolute top-2 right-14 z-20'>
@@ -1079,7 +1195,15 @@ export default function Home({
                     setCurrentViewMode('formatter')
                     const newUrl = new URL(window.location.href)
                     newUrl.searchParams.set('view', 'formatter')
-                    router.push(newUrl.pathname + newUrl.search)
+                    window.history.pushState(
+                      {
+                        ...window.history.state,
+                        as: newUrl.toString(),
+                        url: newUrl.toString(),
+                      },
+                      '',
+                      newUrl.toString()
+                    )
                   }}
                   className={cn(
                     'p-2 rounded-full shadow-lg border backdrop-blur-sm transition-all duration-200',
@@ -1102,7 +1226,15 @@ export default function Home({
                     setCurrentViewMode('visualize')
                     const newUrl = new URL(window.location.href)
                     newUrl.searchParams.set('view', 'visualize')
-                    router.push(newUrl.pathname + newUrl.search)
+                    window.history.pushState(
+                      {
+                        ...window.history.state,
+                        as: newUrl.toString(),
+                        url: newUrl.toString(),
+                      },
+                      '',
+                      newUrl.toString()
+                    )
                   }}
                   className={cn(
                     'p-2 rounded-full shadow-lg border backdrop-blur-sm transition-all duration-200',
@@ -1126,7 +1258,15 @@ export default function Home({
                     setCurrentViewMode('tree')
                     const newUrl = new URL(window.location.href)
                     newUrl.searchParams.set('view', 'tree')
-                    router.push(newUrl.pathname + newUrl.search)
+                    window.history.pushState(
+                      {
+                        ...window.history.state,
+                        as: newUrl.toString(),
+                        url: newUrl.toString(),
+                      },
+                      '',
+                      newUrl.toString()
+                    )
                   }}
                   className={cn(
                     'p-2 rounded-full shadow-lg border backdrop-blur-sm transition-all duration-200',
@@ -1273,7 +1413,7 @@ export default function Home({
                 <input
                   ref={fileInputRef}
                   type='file'
-                  accept='.json'
+                  accept='application/json,.json'
                   className='hidden'
                   onChange={handleUploadFile}
                 />

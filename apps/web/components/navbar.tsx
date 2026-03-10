@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { Menu, X, Sparkles, Monitor, Rocket } from 'lucide-react'
+import { Menu, X, Sparkles, Monitor, Wrench, Star, Rocket } from 'lucide-react'
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false)

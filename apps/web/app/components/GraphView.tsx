@@ -6,6 +6,8 @@ import ReactFlow, {
   Edge,
   Node,
   ReactFlowProvider,
+  useNodesState,
+  useEdgesState,
   Panel,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
@@ -34,7 +36,7 @@ const GraphViewContent: React.FC<GraphViewProps> = ({ nodes, edges }) => {
   const isDark = theme === 'dark'
   const [mounted, setMounted] = React.useState(false)
   const [selectedNode, setSelectedNode] = React.useState<{
-    content: unknown
+    content: any
     path: string
   } | null>(null)
   const [isLocked, setIsLocked] = React.useState(false)

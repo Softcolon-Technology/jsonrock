@@ -1,8 +1,6 @@
 import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
-import EditorPage, {
-  type SerializedShareLinkRecord,
-} from '@/app/editor/editor-page'
+import EditorPage from '@/app/editor/editor-page'
 
 interface Props {
   params: Promise<{ slug: string }>
@@ -11,7 +9,7 @@ interface Props {
 export default async function EditorSlugPage({ params }: Props) {
   const resolvedParams = await params
 
-  let initialRecord: SerializedShareLinkRecord | null = null
+  let initialRecord: any
 
   try {
     // Fetch from backend API
@@ -37,7 +35,6 @@ export default async function EditorSlugPage({ params }: Props) {
         isPrivate: data.isPrivate || false,
         accessType: data.accessType || 'editor',
         createdAt: new Date().toISOString(),
-        updatedAt: new Date(),
       }
     } else {
       // Record doesn't exist - redirect to editor
@@ -50,7 +47,7 @@ export default async function EditorSlugPage({ params }: Props) {
 
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <EditorPage initialRecord={initialRecord ?? undefined} />
+      <EditorPage initialRecord={initialRecord} />
     </Suspense>
   )
 }

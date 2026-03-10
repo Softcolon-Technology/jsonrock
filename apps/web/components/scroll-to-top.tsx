@@ -1,6 +1,5 @@
 'use client'
 
-/* eslint-disable react/prop-types -- using TypeScript interface for props */
 import { useEffect, useRef, useState } from 'react'
 import { ArrowUp } from 'lucide-react'
 

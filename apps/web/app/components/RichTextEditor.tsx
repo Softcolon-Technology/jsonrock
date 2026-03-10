@@ -84,8 +84,7 @@ const FontSize = Extension.create({
     return {
       setFontSize:
         (fontSize: string) =>
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TipTap command context
-        ({ chain, state }: any) => {
+        ({ chain, state, commands }: any) => {
           // If selection is inside a list item, update the list item too
           const { selection } = state
           const { $from, $to } = selection
@@ -95,8 +94,7 @@ const FontSize = Extension.create({
           state.doc.nodesBetween(
             $from.pos,
             $to.pos,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars -- TipTap node type; pos required by API
-            (node: any, _pos: number) => {
+            (node: any, pos: number) => {
               if (node.type.name === 'listItem') {
                 chainBuilder.updateAttributes('listItem', { fontSize })
               }
@@ -107,7 +105,6 @@ const FontSize = Extension.create({
         },
       unsetFontSize:
         () =>
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TipTap command context
         ({ chain }: any) => {
           return chain()
             .setMark('textStyle', { fontSize: null })
@@ -158,14 +155,6 @@ interface RichTextEditorProps {
   forceLightMode?: boolean
 }
 
-interface ToolbarButtonProps {
-  onClick: () => void
-  isActive?: boolean
-  disabled?: boolean
-  children: React.ReactNode
-  title?: string
-  forceLightMode?: boolean
-}
 const ToolbarButton = ({
   onClick,
   isActive,
@@ -173,7 +162,7 @@ const ToolbarButton = ({
   children,
   title,
   forceLightMode,
-}: ToolbarButtonProps) => (
+}: any) => (
   <button
     onClick={onClick}
     disabled={disabled}

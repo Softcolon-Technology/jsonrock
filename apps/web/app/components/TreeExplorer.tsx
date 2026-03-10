@@ -5,15 +5,15 @@ import JsonTreeView, { TreeAction } from './JsonTreeView'
 import PropertyTable from './PropertyTable'
 import { ChevronsDown, ChevronsUp } from 'lucide-react'
 
-export default function TreeExplorer({ data }: { data: unknown }) {
+export default function TreeExplorer({ data }: { data: any }) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [tableData, setTableData] = useState<{
-    data: unknown
+    data: any
     name?: string
   } | null>(null)
   const [treeAction, setTreeAction] = useState<TreeAction | null>(null)
 
-  const onSelect = (path: string, nodeData: unknown, name?: string) => {
+  const onSelect = (path: string, nodeData: any, name?: string) => {
     // Always highlight the clicked node in the tree
     setSelectedPath(path)
 

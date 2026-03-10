@@ -7,6 +7,7 @@ interface JsonEditorProps {
   remoteValue?: { code: string; nonce: number } | null
   onChange: (value: string | undefined) => void
   onReady?: () => void
+  onValidate?: (markers: any[]) => void
   readOnly?: boolean
   className?: string
   options?: editor.IStandaloneEditorConstructionOptions
@@ -21,14 +22,15 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
   remoteValue,
   onChange,
   onReady,
+  onValidate,
   readOnly = false,
   className,
   options: customOptions,
   language = 'json',
 }) => {
   const { theme } = useTheme()
-  const editorRef = React.useRef<editor.IStandaloneCodeEditor | null>(null)
-  const monacoRef = React.useRef<typeof import('monaco-editor') | null>(null)
+  const editorRef = React.useRef<any>(null)
+  const monacoRef = React.useRef<any>(null)
   const isRemoteUpdate = React.useRef(false) // Flag to prevent loop
 
   const handleEditorDidMount: OnMount = (editor, monaco) => {
@@ -91,11 +93,7 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
     }
   }, [remoteValue])
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Monaco passes (value, event); event not needed
-  const handleEditorChange = (
-    value: string | undefined,
-    _event: editor.IModelContentChangedEvent
-  ) => {
+  const handleEditorChange = (value: string | undefined, event: any) => {
     // If this change was triggered by our own remote update logic, ignore it
     if (isRemoteUpdate.current) return
 
@@ -115,6 +113,7 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
         language={language}
         defaultValue={defaultValue}
         onChange={handleEditorChange}
+        onValidate={onValidate}
         // Default theme prop is initial only, effect handles updates
         theme={theme === 'dark' ? 'vs-dark' : 'light'}
         options={{
@@ -134,6 +133,9 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
             horizontalScrollbarSize: 10,
             verticalHasArrows: false,
             horizontalHasArrows: false,
+          },
+          hover: {
+            enabled: false,
           },
           ...customOptions,
         }}

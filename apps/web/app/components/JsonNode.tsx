@@ -12,6 +12,14 @@ const TypeColor = {
   array: 'text-zinc-600 dark:text-zinc-300',
 }
 
+const TypeBadge = ({ type }: { type: string }) => {
+  return (
+    <span className='text-[9px] uppercase tracking-wider opacity-50 ml-auto font-mono'>
+      {type}
+    </span>
+  )
+}
+
 const JsonNode = ({ data, selected }: NodeProps<GraphNodeData>) => {
   return (
     <div
@@ -61,8 +69,8 @@ const JsonNode = ({ data, selected }: NodeProps<GraphNodeData>) => {
             <span
               className={cn(
                 'font-mono text-[10px] line-clamp-2 break-all whitespace-normal leading-tight',
-                TypeColor[prop.type as keyof typeof TypeColor] ||
-                  'text-zinc-600 dark:text-zinc-300'
+                // @ts-ignore
+                TypeColor[prop.type] || 'text-zinc-600 dark:text-zinc-300'
               )}
             >
               {prop.value}
@@ -74,8 +82,8 @@ const JsonNode = ({ data, selected }: NodeProps<GraphNodeData>) => {
             <span
               className={cn(
                 'font-mono text-xs line-clamp-2 break-all whitespace-normal leading-tight',
-                TypeColor[data.type as keyof typeof TypeColor] ||
-                  'text-zinc-600 dark:text-zinc-300'
+                // @ts-ignore
+                TypeColor[data.type] || 'text-zinc-600 dark:text-zinc-300'
               )}
             >
               {data.value}

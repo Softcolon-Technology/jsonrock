@@ -35,14 +35,16 @@
 /* Neubrutalist Card Styles */
 .neubrutalist-card {
   background: white;
-  border: 2px solid var(--heading); /* #1A1D1B */
+  border: 2px solid var(--heading);
+  /* #1A1D1B */
   box-shadow: 8px 8px 0px 0px var(--heading);
   transition: all 0.2s ease;
 }
 
 .neubrutalist-card:hover {
   transform: translate(-2px, -2px);
-  box-shadow: 12px 12px 0px 0px var(--primary); /* #00B3B7 */
+  box-shadow: 12px 12px 0px 0px var(--primary);
+  /* #00B3B7 */
 }
 
 .card-inner-grid {
@@ -68,27 +70,27 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #e4e4e7;
-  /* zinc-200 */
+  background: #a1a1aa;
+  /* zinc-400 */
   border-radius: 10px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #d4d4d8;
-  /* zinc-300 */
+  background-color: #71717a;
+  /* zinc-500 */
 }
 
 /* Dark Mode Scrollbars */
 .dark ::-webkit-scrollbar-thumb {
-  background: #27272a;
-  /* zinc-800 */
+  background: #71717a;
+  /* zinc-500 */
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background-color: #3f3f46;
-  /* zinc-700 */
+  background-color: #a1a1aa;
+  /* zinc-400 */
 }
 
 /* === Monaco Editor Scrollbar Overrides === */
@@ -113,8 +115,8 @@ body {
 
 /* Common Slider Styles (Colors & Borders) */
 .monaco-editor .scrollbar .slider {
-  background: #e4e4e7 !important;
-  /* zinc-200 */
+  background: #a1a1aa !important;
+  /* zinc-400 */
   border: 2px solid transparent !important;
   background-clip: content-box !important;
   border-radius: 9999px !important;
@@ -134,23 +136,23 @@ body {
 
 /* Hover state for Monaco slider */
 .monaco-editor .scrollbar .slider:hover {
-  background-color: #d4d4d8 !important;
-  /* zinc-300 */
+  background-color: #71717a !important;
+  /* zinc-500 */
   border: 2px solid transparent !important;
   background-clip: content-box !important;
 }
 
 /* Dark Mode Monaco Overrides */
 .dark .monaco-editor .scrollbar .slider {
-  background: #27272a !important;
-  /* zinc-800 */
+  background: #71717a !important;
+  /* zinc-500 */
   border: 2px solid transparent !important;
   background-clip: content-box !important;
 }
 
 .dark .monaco-editor .scrollbar .slider:hover {
-  background-color: #3f3f46 !important;
-  /* zinc-700 */
+  background-color: #a1a1aa !important;
+  /* zinc-400 */
   border: 2px solid transparent !important;
   background-clip: content-box !important;
 }
@@ -244,7 +246,7 @@ pre[class*="bg-zinc"] {
   white-space: pre !important;
   /* Scrollbar styling - transparent track, subtle thumb */
   scrollbar-width: thin;
-  scrollbar-color: #d4d4d8 transparent;
+  scrollbar-color: #a1a1aa transparent;
 }
 
 /* Rich Text Editor List Styling */
@@ -288,7 +290,7 @@ pre[class*="bg-zinc"]::-webkit-scrollbar-track {
 .ProseMirror pre::-webkit-scrollbar-thumb,
 .editor-page pre::-webkit-scrollbar-thumb,
 pre[class*="bg-zinc"]::-webkit-scrollbar-thumb {
-  background-color: #d4d4d8 !important;
+  background-color: #a1a1aa !important;
   border-radius: 4px;
 }
 
@@ -296,7 +298,7 @@ pre[class*="bg-zinc"]::-webkit-scrollbar-thumb {
 .ProseMirror pre::-webkit-scrollbar-thumb:hover,
 .editor-page pre::-webkit-scrollbar-thumb:hover,
 pre[class*="bg-zinc"]::-webkit-scrollbar-thumb:hover {
-  background-color: #a1a1aa !important;
+  background-color: #71717a !important;
 }
 
 /* Scrollbar corner - where horizontal and vertical meet */
@@ -312,7 +314,7 @@ pre[class*="bg-zinc"]::-webkit-scrollbar-corner {
 .dark .ProseMirror pre,
 .dark .editor-page pre,
 .dark pre[class*="bg-zinc"] {
-  scrollbar-color: #52525b transparent;
+  scrollbar-color: #71717a transparent;
 }
 
 .dark .page-code-block::-webkit-scrollbar,
@@ -387,25 +389,21 @@ pre[class*="bg-zinc"]::-webkit-scrollbar-corner {
   left: 0;
   right: 0;
   height: 40px;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(0, 0, 0, 0.02) 20%,
-    rgba(0, 0, 0, 0.05) 50%,
-    rgba(0, 0, 0, 0.02) 80%,
-    transparent 100%
-  );
+  background: linear-gradient(to bottom,
+      transparent 0%,
+      rgba(0, 0, 0, 0.02) 20%,
+      rgba(0, 0, 0, 0.05) 50%,
+      rgba(0, 0, 0, 0.02) 80%,
+      transparent 100%);
   pointer-events: none;
   z-index: 1;
 }
 
 .dark .editor-page::after {
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(255, 255, 255, 0.02) 20%,
-    rgba(255, 255, 255, 0.05) 50%,
-    rgba(255, 255, 255, 0.02) 80%,
-    transparent 100%
-  );
+  background: linear-gradient(to bottom,
+      transparent 0%,
+      rgba(255, 255, 255, 0.02) 20%,
+      rgba(255, 255, 255, 0.05) 50%,
+      rgba(255, 255, 255, 0.02) 80%,
+      transparent 100%);
 }

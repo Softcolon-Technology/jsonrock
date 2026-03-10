@@ -22,17 +22,17 @@ export type GraphNodeData = {
   childrenCount?: number
   properties?: { key: string; value: string; type: string }[]
   path?: string
-  content?: unknown
+  content?: any
 }
 
 // Helper to identify type
-const getType = (value: unknown): string => {
+const getType = (value: any): string => {
   if (value === null) return 'null'
   if (Array.isArray(value)) return 'array'
   return typeof value
 }
 
-const getStringValue = (value: unknown): string => {
+const getStringValue = (value: any): string => {
   if (typeof value === 'object' && value !== null) {
     if (Array.isArray(value)) return `[${value.length}]`
     return `{${Object.keys(value).length}}`
@@ -40,7 +40,7 @@ const getStringValue = (value: unknown): string => {
   return String(value)
 }
 
-export const getLayoutedElements = async (json: unknown) => {
+export const getLayoutedElements = async (json: any) => {
   const nodes: Node[] = []
   const edges: Edge[] = []
 
@@ -54,7 +54,7 @@ export const getLayoutedElements = async (json: unknown) => {
   // Recursive function to build graph
   const traverse = (
     key: string,
-    value: unknown,
+    value: any,
     parentId?: string,
     edgeLabel?: string,
     currentPath: string = '$'
@@ -75,12 +75,7 @@ export const getLayoutedElements = async (json: unknown) => {
     const width = 220 // estimated width
     let height = 60 // initial height estimate
 
-    if (
-      type === 'object' &&
-      value !== null &&
-      typeof value === 'object' &&
-      !Array.isArray(value)
-    ) {
+    if (type === 'object' && value !== null) {
       isComplex = true
       nodeData.properties = []
       // Extract Primitives
@@ -97,7 +92,7 @@ export const getLayoutedElements = async (json: unknown) => {
       // Calculate height based on properties
       // Base header ~40px, each row ~24px
       height = 40 + (nodeData.properties?.length || 0) * 28 + 10
-    } else if (type === 'array' && Array.isArray(value)) {
+    } else if (type === 'array') {
       isComplex = true
       nodeData.childrenCount = value.length
       nodeData.label = key
@@ -140,22 +135,13 @@ export const getLayoutedElements = async (json: unknown) => {
         animated: true,
         style: { stroke: '#52525b', strokeWidth: 1.5 },
         labelStyle: { fill: '#a1a1aa', fontSize: 11, fontWeight: 500 },
-        labelBgStyle: {
-          fill: 'transparent',
-          fillOpacity: 0.8,
-          borderRadius: 4,
-        },
+        labelBgStyle: { fill: 'transparent', fillOpacity: 0.8 } as any,
       })
     }
 
     // Traverse Children
     if (isComplex) {
-      if (
-        type === 'object' &&
-        value !== null &&
-        typeof value === 'object' &&
-        !Array.isArray(value)
-      ) {
+      if (type === 'object') {
         Object.entries(value).forEach(([k, v]) => {
           // Only traverse complex types (objects/arrays) as new nodes. Primitives are already in 'properties'.
           if (getType(v) === 'object' || getType(v) === 'array') {
@@ -168,8 +154,8 @@ export const getLayoutedElements = async (json: unknown) => {
             traverse(k, v, nodeId, k, nextPath)
           }
         })
-      } else if (type === 'array' && Array.isArray(value)) {
-        value.forEach((item: unknown, index: number) => {
+      } else if (type === 'array') {
+        value.forEach((item: any, index: number) => {
           // Path construction for array: currentPath[index]
           const nextPath = `${currentPath}[${index}]`
           traverse(`${index}`, item, nodeId, undefined, nextPath)
@@ -184,7 +170,7 @@ export const getLayoutedElements = async (json: unknown) => {
     id: 'root',
     layoutOptions,
     children: elkNodes,
-    edges: elkEdges as unknown as ElkNode['edges'],
+    edges: elkEdges as any,
   }
 
   try {

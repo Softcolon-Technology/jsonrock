@@ -3,17 +3,17 @@ import { Copy, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface PropertyTableProps {
-  data: unknown
+  data: any
   name?: string
 }
 
-const getType = (value: unknown): string => {
+const getType = (value: any): string => {
   if (value === null) return 'null'
   if (Array.isArray(value)) return 'array'
   return typeof value
 }
 
-const getStringValue = (value: unknown, type: string): string => {
+const getStringValue = (value: any, type: string): string => {
   if (type === 'object' || type === 'array') return '...'
   if (type === 'null') return 'null'
   if (type === 'undefined') return 'undefined'
@@ -21,19 +21,24 @@ const getStringValue = (value: unknown, type: string): string => {
 }
 
 export default function PropertyTable({ data, name }: PropertyTableProps) {
+  // If data is null/undefined, handle gracefully
+  if (data === undefined) return null
+
+  // Determine what to show
+  // If "data" is an object/array, we show its children as rows.
+  // If "data" is primitive, we show ITSELF as the row? Or do we expect the parent to have passed the object?
+  // Based on "stack.hu", clicking a node shows its properties.
+  // If I click a leaf (Key: Value), it usually shows that Key/Value.
+  // Let's assume 'data' is the value of the selected node.
+
+  let entries: [string, any][] = []
   const [tooltip, setTooltip] = React.useState<{
     x: number
     y: number
     content: string
   } | null>(null)
-  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const timerRef = React.useRef<any>(null)
   const posRef = React.useRef({ x: 0, y: 0 })
-
-  // If data is null/undefined, handle gracefully (after hooks to satisfy rules-of-hooks)
-  if (data === undefined) return null
-
-  // Determine what to show
-  let entries: [string, unknown][] = []
 
   const handleMouseEnter = (content: string) => {
     if (timerRef.current) clearTimeout(timerRef.current)
@@ -64,7 +69,7 @@ export default function PropertyTable({ data, name }: PropertyTableProps) {
   const type = getType(data)
   const isComplex = type === 'object' || type === 'array'
 
-  if (isComplex && data !== null && typeof data === 'object') {
+  if (isComplex && data !== null) {
     entries = Object.entries(data)
   } else {
     // Primitive selected.
@@ -92,7 +97,7 @@ export default function PropertyTable({ data, name }: PropertyTableProps) {
       <div className='flex-1 overflow-auto bg-white dark:bg-[#0a0a0a]'>
         <table className='w-full min-w-[300px] border-collapse text-xs'>
           <tbody>
-            {entries.map(([key, value]) => {
+            {entries.map(([key, value], index) => {
               const valType = getType(value)
               const displayVal = getStringValue(value, valType)
               const isRowComplex = valType === 'object' || valType === 'array'
