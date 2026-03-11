@@ -33,7 +33,7 @@ export default function TreeExplorer({ data }: { data: any }) {
   }
 
   // Resizing Logic
-  const [leftWidth, setLeftWidth] = useState(60)
+  const [leftWidth, setLeftWidth] = useState(40)
   const [isDragging, setIsDragging] = useState(false)
   const containerRef = React.useRef<HTMLDivElement>(null)
 

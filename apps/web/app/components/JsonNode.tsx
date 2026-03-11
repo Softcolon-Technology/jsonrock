@@ -3,109 +3,187 @@ import { Handle, Position, NodeProps } from 'reactflow'
 import { GraphNodeData } from '@/lib/graph-layout'
 import { cn } from '@/lib/utils'
 
-const TypeColor = {
-  string: 'text-emerald-600 dark:text-emerald-400',
-  number: 'text-blue-600 dark:text-blue-400',
-  boolean: 'text-rose-600 dark:text-rose-400',
-  null: 'text-zinc-500 dark:text-zinc-500',
-  object: 'text-zinc-600 dark:text-zinc-300',
-  array: 'text-zinc-600 dark:text-zinc-300',
+// ─── Type colours ────────────────────────────────────────────────────────────
+const TypeColor: Record<string, string> = {
+  number: 'text-blue-500 dark:text-blue-400',
+  boolean: 'text-rose-500 dark:text-rose-400',
+  null: 'text-zinc-400 dark:text-zinc-500',
 }
+const keyClass = 'text-emerald-600 dark:text-emerald-400'
+const valueDefaultClass = 'text-black dark:text-white'
 
-const TypeBadge = ({ type }: { type: string }) => {
-  return (
-    <span className='text-[9px] uppercase tracking-wider opacity-50 ml-auto font-mono'>
-      {type}
-    </span>
-  )
-}
-
+// ─── JsonNode ─────────────────────────────────────────────────────────────────
+// Styling mirrors JSONCrack exactly:
+//   • font-size: 12px, font-weight: 500, font-family: monospace
+//   • row height: 30px   (ROW_HEIGHT constant in graph-layout.ts)
+//   • header height: 36px (PARENT_HEIGHT constant)
+//   • padding: 3px 10px per row
+//   • white-space: nowrap + text-overflow: ellipsis — NEVER wraps
+//   • width is set by graph-layout (DOM-measured, matches actual rendering)
 const JsonNode = ({ data, selected }: NodeProps<GraphNodeData>) => {
   return (
     <div
       className={cn(
-        'min-w-[220px] max-w-[300px] rounded-lg border bg-white dark:bg-[#09090b] shadow-xl transition-all duration-200',
+        'rounded-sm border bg-white dark:bg-[#1e1e1e] shadow-md transition-colors duration-150 overflow-hidden',
         selected
-          ? 'border-emerald-500/50 ring-1 ring-emerald-500/20'
-          : 'border-zinc-200 dark:border-zinc-800'
+          ? 'border-emerald-500 ring-1 ring-emerald-500/30'
+          : 'border-zinc-200 dark:border-zinc-700'
       )}
+      style={{
+        fontFamily:
+          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        fontWeight: 500,
+        WebkitFontSmoothing: 'antialiased',
+        MozOsxFontSmoothing: 'grayscale',
+      }}
     >
+      {/* Target handle — always at center-left, invisible */}
       <Handle
         type='target'
         position={Position.Left}
-        className='!border-zinc-300 dark:!border-zinc-700 !bg-zinc-100 dark:!bg-zinc-900 w-3 h-3 -ml-1.5'
+        style={{ opacity: 0, background: 'transparent', border: 'none' }}
       />
 
-      {/* Header */}
-      <div className='flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/30 px-3 py-2'>
-        <div className='flex items-center gap-2 overflow-hidden'>
-          <div
-            className={cn(
-              'h-2 w-2 rounded-full',
-              data.type === 'array' ? 'bg-blue-500' : 'bg-orange-500'
-            )}
+      {/* Source handles:
+          • Multi-child: one handle per child, each at an evenly-spaced top% within the node.
+            React Flow's CSS class keeps transform: translateY(-50%) so the handle center
+            sits exactly at the top% position — always within [0%, 100%] of the node.
+          • Single/no children: standard center handle (default 50%). */}
+      {data.sourceHandlePositions && data.sourceHandlePositions.length > 0 ? (
+        data.sourceHandlePositions.map(({ id, topPercent }) => (
+          <Handle
+            key={id}
+            id={id}
+            type='source'
+            position={Position.Right}
+            style={{
+              opacity: 0,
+              background: 'transparent',
+              border: 'none',
+              top: `${topPercent}%`,
+              // React Flow's CSS class keeps transform: translateY(-50%) for correct centering
+            }}
           />
-          <span className='truncate font-mono text-xs font-bold text-zinc-700 dark:text-zinc-200'>
-            {data.label || 'Object'}
-          </span>
-        </div>
+        ))
+      ) : (
+        <Handle
+          type='source'
+          position={Position.Right}
+          style={{ opacity: 0, background: 'transparent', border: 'none' }}
+        />
+      )}
+
+      {/* height: 36px (PARENT_HEIGHT), matches JSON Crack */}
+      <div
+        className='flex items-center gap-1.5 px-2.5 border-b border-zinc-100 dark:border-zinc-700/60 bg-zinc-50 dark:bg-zinc-800/50'
+        style={{ height: 36 }}
+      >
+        <span
+          className={cn(
+            'h-2 w-2 shrink-0 rounded-full',
+            data.type === 'array' ? 'bg-blue-400' : 'bg-orange-400'
+          )}
+        />
+        {/* 12px monospace 500 — matches JSONCrack node font */}
+        <span
+          className='font-mono font-medium text-zinc-700 dark:text-zinc-200 truncate'
+          style={{ fontSize: 12 }}
+        >
+          {data.label || 'root'}
+        </span>
         {data.childrenCount !== undefined && (
-          <span className='text-[10px] text-zinc-400 dark:text-zinc-500 font-mono'>
+          <span
+            className='ml-auto shrink-0 font-mono text-zinc-400 dark:text-zinc-500'
+            style={{ fontSize: 11 }}
+          >
             {data.childrenCount} items
           </span>
         )}
       </div>
 
-      {/* Body */}
-      <div className='p-2 space-y-1'>
+      {/* ── Rows ── */}
+      {/* Each row: height 30px, padding 3px 10px, nowrap+ellipsis — exact JSONCrack */}
+      <div>
         {data.properties?.map((prop, idx) => (
           <div
             key={idx}
-            className='grid grid-cols-[auto_1fr] gap-2 px-1 hover:bg-zinc-100 dark:hover:bg-zinc-900/50 rounded py-0.5 transition-colors items-baseline'
+            className='flex items-center border-b border-zinc-100 dark:border-zinc-700/50 last:border-b-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors'
+            style={{
+              height: 30,
+              padding: '3px 10px',
+              lineHeight: '24px',
+              boxSizing: 'border-box',
+            }}
           >
-            <span className='font-mono text-[10px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap'>
-              {prop.key}:
-            </span>
+            {/* Key */}
             <span
               className={cn(
-                'font-mono text-[10px] line-clamp-2 break-all whitespace-normal leading-tight',
-                // @ts-ignore
-                TypeColor[prop.type] || 'text-zinc-600 dark:text-zinc-300'
+                'shrink-0 font-mono font-medium whitespace-nowrap overflow-hidden text-ellipsis mr-1',
+                keyClass
               )}
+              style={{ fontSize: 14 }}
+            >
+              {prop.key}:{' '}
+            </span>
+            {/* Value */}
+            <span
+              className={cn(
+                'font-mono font-medium whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0',
+                TypeColor[prop.type] ?? valueDefaultClass
+              )}
+              style={{ fontSize: 14 }}
+              title={prop.value}
             >
               {prop.value}
             </span>
           </div>
         ))}
-        {data.value && (
-          <div className='flex items-center gap-2 px-1'>
+
+        {/* Primitive value (leaf node) */}
+        {data.value !== undefined && (
+          <div
+            className='flex items-center'
+            style={{
+              height: 30,
+              padding: '3px 10px',
+              lineHeight: '24px',
+              boxSizing: 'border-box',
+            }}
+          >
             <span
               className={cn(
-                'font-mono text-xs line-clamp-2 break-all whitespace-normal leading-tight',
-                // @ts-ignore
-                TypeColor[data.type] || 'text-zinc-600 dark:text-zinc-300'
+                'font-mono font-medium whitespace-nowrap overflow-hidden text-ellipsis w-full',
+                TypeColor[data.type] ?? valueDefaultClass
               )}
+              style={{ fontSize: 12 }}
+              title={data.value}
             >
               {data.value}
             </span>
           </div>
         )}
 
-        {(!data.properties || data.properties.length === 0) && !data.value && (
-          <div className='px-1 py-1 text-[10px] text-zinc-400 dark:text-zinc-600 italic'>
-            {data.type === 'object'
-              ? '{} empty object'
-              : data.type === 'array' && data.childrenCount === 0
-                ? '[] empty array'
-                : ''}
-          </div>
-        )}
+        {/* Empty state */}
+        {(!data.properties || data.properties.length === 0) &&
+          data.value === undefined && (
+            <div
+              className='flex items-center font-mono italic text-zinc-400 dark:text-zinc-600'
+              style={{
+                height: 30,
+                padding: '3px 10px',
+                lineHeight: '24px',
+                fontSize: 11,
+              }}
+            >
+              {/* {data.type === 'object' ? '{} empty object' : data.type === 'array' && data.childrenCount === 0 ? '[] empty array' : ''} */}
+            </div>
+          )}
       </div>
 
       <Handle
         type='source'
         position={Position.Right}
-        className='!border-zinc-300 dark:!border-zinc-700 !bg-zinc-100 dark:!bg-zinc-900 w-3 h-3 -mr-1.5'
+        style={{ opacity: 0, background: 'transparent', border: 'none' }}
       />
     </div>
   )

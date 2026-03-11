@@ -1284,7 +1284,6 @@ export default function Home({
             </div>
             {/* Output Panel: only render after editor mounted and (if graph mode) layout is computed */}
             {isEditorReady &&
-              (currentViewMode !== 'visualize' || !isLayoutCalculating) &&
               (isJsonValid && !parsedJsonData ? (
                 <div className='h-full w-full flex flex-col items-center justify-center pl-16 animate-in fade-in zoom-in-95 duration-200'>
                   <div className='mb-4 p-4 rounded-full bg-zinc-200 dark:bg-zinc-800/50'>
@@ -1301,13 +1300,20 @@ export default function Home({
                 <>
                   <div
                     className={cn(
-                      'h-full w-full',
+                      'h-full w-full relative',
                       currentViewMode !== 'visualize' && 'hidden'
                     )}
                   >
-                    {/* Only mount GraphView once layout is fully computed — prevents blink */}
-                    {!isLayoutCalculating && (
-                      <GraphView nodes={graphNodes} edges={graphEdges} />
+                    {/* GraphView is ALWAYS mounted — never unmounted on JSON change.
+                        This preserves React Flow's internal zoom/viewport state and
+                        our hasFitOnce ref. Loading state is shown as an overlay instead. */}
+                    <GraphView nodes={graphNodes} edges={graphEdges} />
+
+                    {/* Loading overlay — shown while ELK is computing new layout */}
+                    {isLayoutCalculating && (
+                      <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/60 dark:bg-zinc-950/60 backdrop-blur-sm'>
+                        <div className='w-5 h-5 border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300 rounded-full animate-spin' />
+                      </div>
                     )}
                   </div>
 

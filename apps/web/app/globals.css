@@ -407,3 +407,25 @@ pre[class*="bg-zinc"]::-webkit-scrollbar-corner {
       rgba(255, 255, 255, 0.02) 80%,
       transparent 100%);
 }
+
+/* ── Graph edge hover / selected ───────────────────────────────────────────── */
+/* Pure CSS — more reliable than JS state because React Flow's SVG canvas      */
+/* intercepts pointer events before they reach individual path elements.        */
+
+/* Hover: turn the visible edge path green */
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #22c55e !important;
+  stroke-width: 2 !important;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease;
+}
+
+/* Selected: slightly darker green (edge clicked) */
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #16a34a !important;
+  stroke-width: 2 !important;
+}
+
+/* Widen the invisible interaction area so thin edges are easy to hover */
+.react-flow__edge-interaction {
+  stroke-width: 20 !important;
+}

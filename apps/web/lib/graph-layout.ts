@@ -3,14 +3,27 @@ import { Edge, Node } from 'reactflow'
 
 const elk = new ELK()
 
-// Layout options for a clean Left-to-Right graph
+// ─── Constants matching JSONCrack exactly ────────────────────────────────────
+const ROW_HEIGHT = 30 // Height of each data row
+const PARENT_HEIGHT = 36 // Height for header / parent label row
+const MAX_NODE_WIDTH = 700
+const MIN_NODE_WIDTH = 45
+
 const layoutOptions = {
   'elk.algorithm': 'layered',
   'elk.direction': 'RIGHT',
-  'elk.layered.spacing.nodeNodeBetweenLayers': '180',
-  'elk.spacing.nodeNode': '100', // Vertical gap
+  'elk.layered.spacing.nodeNodeBetweenLayers': '140',
+  'elk.spacing.nodeNode': '80', // Increased to spread children more for better fan-out visibility
   'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
   'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+}
+
+// Handle position info for edge fan-out:
+// topPercent is the CSS `top` percentage (0–100) WITHIN the node bounds.
+// Always within [0, 100] — no overflow outside the node!
+export type SourceHandlePosition = {
+  id: string // matches edge's sourceHandle prop
+  topPercent: number // handle center at this % of node height via top: "${topPercent}%"
 }
 
 export type GraphNodeData = {
@@ -18,14 +31,17 @@ export type GraphNodeData = {
   type: string
   isPrimitive?: boolean
   value?: string
-  objectKey?: string // The key in the parent object
+  objectKey?: string
   childrenCount?: number
   properties?: { key: string; value: string; type: string }[]
   path?: string
   content?: any
+  isRoot?: boolean // no incoming edge
+  hasOutgoing?: boolean // has child nodes
+  sourceHandlePositions?: SourceHandlePosition[] // fan-out handles (multi-child only)
 }
 
-// Helper to identify type
+// ─── Type helpers ────────────────────────────────────────────────────────────
 const getType = (value: any): string => {
   if (value === null) return 'null'
   if (Array.isArray(value)) return 'array'
@@ -33,138 +49,286 @@ const getType = (value: any): string => {
 }
 
 const getStringValue = (value: any): string => {
-  if (typeof value === 'object' && value !== null) {
-    if (Array.isArray(value)) return `[${value.length}]`
-    return `{${Object.keys(value).length}}`
+  if (value === null) return 'null'
+  if (typeof value === 'object') {
+    if (Array.isArray(value)) return `[${value.length} items]`
+    return `{${Object.keys(value).length} keys}`
   }
   return String(value)
 }
 
+// ─── DOM-based size measurement (exactly like JSONCrack) ─────────────────────
+// We measure text the same way JSONCrack does:
+//  – font-size: 12px, font-weight: 500, font-family: monospace
+//  – white-space: nowrap  (single line, ellipsis handled in CSS)
+//  – padding: 0 10px
+//  – Cap at MAX_NODE_WIDTH
+// This runs ONCE per unique text string and caches the result.
+const sizeCache = new Map<string, number>()
+
+const measureTextWidth = (text: string): number => {
+  if (sizeCache.has(text)) return sizeCache.get(text)!
+
+  // During SSR there is no DOM — use character-count fallback
+  if (typeof document === 'undefined') {
+    const width = Math.min(
+      MAX_NODE_WIDTH,
+      Math.max(MIN_NODE_WIDTH, text.length * 8 + 24)
+    )
+    sizeCache.set(text, width)
+    return width
+  }
+
+  const el = document.createElement('span')
+  el.style.position = 'absolute'
+  el.style.visibility = 'hidden'
+  el.style.pointerEvents = 'none'
+  el.style.whiteSpace = 'nowrap'
+  el.style.fontSize = '12px'
+  el.style.fontWeight = '500'
+  el.style.fontFamily =
+    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+  el.style.padding = '0 10px'
+  el.innerText = text
+  document.body.appendChild(el)
+  const width = Math.min(
+    MAX_NODE_WIDTH,
+    Math.max(MIN_NODE_WIDTH, el.getBoundingClientRect().width + 4)
+  )
+  document.body.removeChild(el)
+
+  sizeCache.set(text, width)
+  return width
+}
+
+// Clear cache every 2 minutes (like JSONCrack)
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => sizeCache.clear(), 120_000)
+}
+
+// Calculate node dimensions from its text rows
+const calcNodeSize = (
+  rows: { key: string; value: string }[],
+  singleText?: string
+): { width: number; height: number } => {
+  if (singleText !== undefined) {
+    // Array header or leaf primitive — single row, measured as-is (already short)
+    const truncated = singleText.slice(0, 80)
+    const width = Math.min(MAX_NODE_WIDTH, measureTextWidth(truncated) + 80)
+    return { width, height: PARENT_HEIGHT }
+  }
+
+  if (rows.length === 0) {
+    return { width: 150, height: PARENT_HEIGHT + ROW_HEIGHT }
+  }
+
+  // *** The JSONCrack trick: slice to 80 chars when MEASURING width ***
+  // Long tokens (JWT, URLs) must not inflate node width — CSS ellipsis handles display.
+  let maxWidth = MIN_NODE_WIDTH
+  for (const { key, value } of rows) {
+    const rowText = `${key}: ${value.slice(0, 80)}` // <── 80-char cap, exactly like JSONCrack
+    const w = measureTextWidth(rowText)
+    if (w > maxWidth) maxWidth = w
+  }
+
+  const width = Math.min(MAX_NODE_WIDTH, maxWidth)
+  const height = PARENT_HEIGHT + rows.length * ROW_HEIGHT
+
+  return { width, height }
+}
+
+// ─── Main layout function ────────────────────────────────────────────────────
 export const getLayoutedElements = async (json: any) => {
   const nodes: Node[] = []
   const edges: Edge[] = []
-
-  // Temporary storage for ELK
-  // Use explicit casting to avoid type errors in this environment if types aren't perfect
   const elkNodes: ElkNode[] = []
   const elkEdges: ElkPrimitiveEdge[] = []
 
   let nodeIdCounter = 0
 
-  // Recursive function to build graph
+  type ChildInfo = {
+    key: string
+    value: any
+    edgeLabel: string | undefined
+    path: string
+  }
+
+  // traverse returns the created nodeId so parents can reference it.
+  // The PARENT creates edges to its children (not the child creating edges to parent).
+  // This way the parent knows both childIndex and total count when creating handle positions.
   const traverse = (
     key: string,
     value: any,
-    parentId?: string,
-    edgeLabel?: string,
+    isRoot: boolean,
     currentPath: string = '$'
-  ) => {
+  ): string => {
     const nodeId = `n-${nodeIdCounter++}`
     const type = getType(value)
 
-    // Prepare node data
     const nodeData: GraphNodeData = {
       label: key || 'root',
       type,
-      objectKey: edgeLabel,
+      objectKey: key || undefined,
       path: currentPath,
       content: value,
+      isRoot,
+      hasOutgoing: false,
     }
 
-    let isComplex = false
-    const width = 220 // estimated width
-    let height = 60 // initial height estimate
+    let width = MIN_NODE_WIDTH
+    let height = PARENT_HEIGHT
+    const complexChildren: ChildInfo[] = []
 
     if (type === 'object' && value !== null) {
-      isComplex = true
       nodeData.properties = []
-      // Extract Primitives
+      const primitiveRows: { key: string; value: string }[] = []
+
       Object.entries(value).forEach(([k, v]) => {
-        if (getType(v) !== 'object' && getType(v) !== 'array') {
-          nodeData.properties?.push({
+        const vType = getType(v)
+        if (vType !== 'object' && vType !== 'array') {
+          const strVal = getStringValue(v)
+          // Truncate displayed value at 80 chars (same limit JSONCrack uses for measurement)
+          const displayVal =
+            strVal.length > 50 ? strVal.slice(0, 50) + '…' : strVal
+          nodeData.properties!.push({ key: k, value: displayVal, type: vType })
+          primitiveRows.push({ key: k, value: strVal }) // full value for width measurement
+        } else {
+          const nextPath = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k)
+            ? `${currentPath}.${k}`
+            : `${currentPath}["${k}"]`
+          complexChildren.push({
             key: k,
-            value: getStringValue(v),
-            type: getType(v),
+            value: v,
+            edgeLabel: k,
+            path: nextPath,
           })
         }
       })
 
-      // Calculate height based on properties
-      // Base header ~40px, each row ~24px
-      height = 40 + (nodeData.properties?.length || 0) * 28 + 10
+      // Use DOM measurement to determine exact size
+      const size = calcNodeSize(primitiveRows)
+      width = size.width
+      height = size.height
+      nodeData.hasOutgoing = complexChildren.length > 0
     } else if (type === 'array') {
-      isComplex = true
       nodeData.childrenCount = value.length
       nodeData.label = key
         ? `${key} [${value.length}]`
         : `Array [${value.length}]`
+
+      // Array header: measure the label text
+      const size = calcNodeSize([], nodeData.label)
+      width = size.width
+      height = value.length === 0 ? PARENT_HEIGHT + ROW_HEIGHT : PARENT_HEIGHT
+
+      // Arrays always spawn child nodes (if non-empty)
+      nodeData.hasOutgoing = value.length > 0
+      value.forEach((item: any, index: number) => {
+        const nextPath = `${currentPath}[${index}]`
+        complexChildren.push({
+          key: String(index),
+          value: item,
+          edgeLabel: undefined,
+          path: nextPath,
+        })
+      })
     } else {
-      // Single primitive root or value
-      nodeData.value = getStringValue(value)
+      // Primitive root or leaf — truncate display value at 80 chars
+      const strVal = getStringValue(value)
+      nodeData.value = strVal.length > 80 ? strVal.slice(0, 80) + '…' : strVal
+      const size = calcNodeSize(
+        [],
+        `${key ? key + ': ' : ''}${strVal.slice(0, 80)}`
+      )
+      width = size.width
+      height = PARENT_HEIGHT
     }
 
-    // Add to ELK nodes
-    elkNodes.push({
-      id: nodeId,
-      width,
-      height,
-    })
-
-    // Add to ReactFlow nodes (position will be updated later)
+    // Push to ELK and React Flow node lists
+    elkNodes.push({ id: nodeId, width, height })
     nodes.push({
       id: nodeId,
       data: nodeData,
       position: { x: 0, y: 0 },
-      type: 'jsonNode', // Custom node type
+      type: 'jsonNode',
     })
 
-    // Create Edge from Parent
-    if (parentId) {
-      const edgeId = `e-${parentId}-${nodeId}`
-      elkEdges.push({
-        id: edgeId,
-        source: parentId,
-        target: nodeId,
-      })
-      edges.push({
-        id: edgeId,
-        source: parentId,
-        target: nodeId,
-        label: edgeLabel,
-        type: 'smoothstep',
-        animated: true,
-        style: { stroke: '#52525b', strokeWidth: 1.5 },
-        labelStyle: { fill: '#a1a1aa', fontSize: 11, fontWeight: 500 },
-        labelBgStyle: { fill: 'transparent', fillOpacity: 0.8 } as any,
+    // ── Process children and create edges ──────────────────────────────────
+    if (complexChildren.length > 0) {
+      // Traverse all children first to get their IDs
+      const childIds = complexChildren.map((child) =>
+        traverse(child.key, child.value, false, child.path)
+      )
+
+      // ── Fan-out source handle positions ────────────────────────────────
+      // For parent with multiple children: distribute handles evenly across
+      // node height using CSS percentages. Handles are ALWAYS within [0, 100]%
+      // of the node — no overflow, no "half edges".
+      //
+      // Formula: topPercent = (i + 1) / (N + 1) * 100
+      //   N=1: 50%  (same as default center)
+      //   N=2: 33%, 67%
+      //   N=3: 25%, 50%, 75%
+      //   N=10: 9%, 18%, 27%, ... 91%
+      if (childIds.length > 1) {
+        nodeData.sourceHandlePositions = childIds.map((_, i) => ({
+          id: `${nodeId}-sh-${i}`,
+          topPercent: ((i + 1) / (childIds.length + 1)) * 100,
+        }))
+      }
+
+      // Create ELK and React Flow edges
+      childIds.forEach((childId, i) => {
+        const edgeId = `e-${nodeId}-${childId}`
+        const sourceHandle =
+          childIds.length > 1 ? `${nodeId}-sh-${i}` : undefined
+
+        elkEdges.push({ id: edgeId, source: nodeId, target: childId })
+        edges.push({
+          id: edgeId,
+          source: nodeId,
+          target: childId,
+          ...(sourceHandle ? { sourceHandle } : {}),
+          label: complexChildren[i]?.edgeLabel,
+          type: 'custom',
+          animated: false,
+          style: { stroke: '#a1a1aa', strokeWidth: 1.5 },
+          labelStyle: { fill: '#a1a1aa', fontSize: 11, fontWeight: 500 },
+          labelBgStyle: { fill: 'transparent' } as any,
+        })
       })
     }
 
-    // Traverse Children
-    if (isComplex) {
-      if (type === 'object') {
-        Object.entries(value).forEach(([k, v]) => {
-          // Only traverse complex types (objects/arrays) as new nodes. Primitives are already in 'properties'.
-          if (getType(v) === 'object' || getType(v) === 'array') {
-            // Path construction for object: currentPath.key
-            // Handle special characters in keys if needed, but simple dot notation for now
-            // If key implies it needs brackets, use brackets, but simple assumption:
-            const nextPath = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k)
-              ? `${currentPath}.${k}`
-              : `${currentPath}["${k}"]`
-            traverse(k, v, nodeId, k, nextPath)
-          }
-        })
-      } else if (type === 'array') {
-        value.forEach((item: any, index: number) => {
-          // Path construction for array: currentPath[index]
-          const nextPath = `${currentPath}[${index}]`
-          traverse(`${index}`, item, nodeId, undefined, nextPath)
-        })
-      }
-    }
+    return nodeId
   }
 
-  traverse('', json, undefined, undefined, '$')
+  // ── Option 1: skip the empty "root" wrapper ───────────────────────────────
+  // When the root JSON is an OBJECT whose every value is a complex type
+  // (array or object), there are no primitive props to display in the root
+  // node — it would just render as an empty "root" box. In that case, start
+  // directly from its children so the graph looks clean (like JSONCrack).
+  // Examples that trigger this: { "items": [...] }, { "users": {}, "posts": [] }
+  // Normal objects with at least one primitive, and plain arrays, go through
+  // the standard root path and get a proper "root" / "Array [N]" node.
+  const shouldSkipRoot =
+    json !== null &&
+    typeof json === 'object' &&
+    !Array.isArray(json) &&
+    Object.values(json as object).length > 0 &&
+    Object.values(json as object).every((v) => {
+      const t = getType(v)
+      return t === 'object' || t === 'array'
+    })
+
+  if (shouldSkipRoot) {
+    // Traverse each top-level key as its own root (isRoot = true for each)
+    Object.entries(json as object).forEach(([k, v]) => {
+      const path = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k) ? `$.${k}` : `$["${k}"]`
+      traverse(k, v, true, path)
+    })
+  } else {
+    traverse('', json, true, '$')
+  }
 
   const graph: ElkNode = {
     id: 'root',
@@ -175,21 +339,50 @@ export const getLayoutedElements = async (json: any) => {
 
   try {
     const layoutedGraph = await elk.layout(graph)
-
-    // sync positions
     layoutedGraph.children?.forEach((node) => {
       const matchingNode = nodes.find((n) => n.id === node.id)
       if (matchingNode) {
-        matchingNode.position = {
-          x: node.x || 0,
-          y: node.y || 0,
-        }
+        matchingNode.position = { x: node.x || 0, y: node.y || 0 }
       }
     })
 
+    // ── Center root node vertically between its direct children ────────────
+    // ELK places nodes from a top-based layout which can leave the root near
+    // the top while children span far below. We post-process to shift the root
+    // to the exact vertical midpoint of its direct children's bounding box.
+    const rootNode = nodes.find((n) => n.data.isRoot)
+    if (rootNode) {
+      const rootEdgeTargets = edges
+        .filter((e) => e.source === rootNode.id)
+        .map((e) => e.target)
+      const directChildren = nodes.filter((n) => rootEdgeTargets.includes(n.id))
+
+      if (directChildren.length > 0) {
+        // Get each child's ELK-computed height from elkNodes
+        const elkHeightMap = new Map(
+          (layoutedGraph.children ?? []).map((n) => [
+            n.id,
+            n.height ?? PARENT_HEIGHT,
+          ])
+        )
+        const childTops = directChildren.map((n) => n.position.y)
+        const childBottoms = directChildren.map(
+          (n) => n.position.y + (elkHeightMap.get(n.id) ?? PARENT_HEIGHT)
+        )
+        const minTop = Math.min(...childTops)
+        const maxBottom = Math.max(...childBottoms)
+        const rootHeight = elkHeightMap.get(rootNode.id) ?? PARENT_HEIGHT
+        // Center root at the midpoint of all children's vertical span
+        rootNode.position = {
+          x: rootNode.position.x,
+          y: (minTop + maxBottom) / 2 - rootHeight / 2,
+        }
+      }
+    }
+
     return { nodes, edges }
   } catch (e) {
-    console.error('Layout failed', e)
-    return { nodes, edges } // Return unlayouted on error
+    console.error('ELK Layout failed', e)
+    return { nodes, edges }
   }
 }

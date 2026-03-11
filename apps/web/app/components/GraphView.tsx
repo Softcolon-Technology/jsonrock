@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 import ReactFlow, {
   Background,
   Controls,
@@ -9,13 +9,19 @@ import ReactFlow, {
   useNodesState,
   useEdgesState,
   Panel,
+  useReactFlow,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import JsonNode from './JsonNode'
+import CustomEdge from './CustomEdge'
 import { Lock, Unlock } from 'lucide-react'
 
 const nodeTypes = {
   jsonNode: JsonNode,
+}
+
+const edgeTypes = {
+  custom: CustomEdge,
 }
 
 interface GraphViewProps {
@@ -40,8 +46,22 @@ const GraphViewContent: React.FC<GraphViewProps> = ({ nodes, edges }) => {
     path: string
   } | null>(null)
   const [isLocked, setIsLocked] = React.useState(false)
+  const { fitView, getNode, setCenter } = useReactFlow()
 
-  React.useEffect(() => {
+  // fitView exactly ONCE on first data load — never again.
+  // Zoom stays as-is when items are added or JSON changes.
+  const hasFitOnce = useRef(false)
+
+  useEffect(() => {
+    if (!mounted || nodes.length === 0 || hasFitOnce.current) return
+    const timer = setTimeout(() => {
+      fitView({ padding: 0.15, duration: 300 })
+      hasFitOnce.current = true
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [nodes, mounted, fitView])
+
+  useEffect(() => {
     setMounted(true)
   }, [])
 
@@ -54,6 +74,18 @@ const GraphViewContent: React.FC<GraphViewProps> = ({ nodes, edges }) => {
       })
     }
   }, [])
+
+  // Click on an edge → smoothly pan to the target node (like JSONCrack)
+  const onEdgeClick = useCallback(
+    (_: React.MouseEvent, edge: Edge) => {
+      const target = getNode(edge.target)
+      if (!target) return
+      const cx = target.position.x + (target.width ?? 200) / 2
+      const cy = target.position.y + (target.height ?? 100) / 2
+      setCenter(cx, cy, { duration: 400, zoom: 1 })
+    },
+    [getNode, setCenter]
+  )
 
   if (!mounted) return null
 
@@ -68,10 +100,15 @@ const GraphViewContent: React.FC<GraphViewProps> = ({ nodes, edges }) => {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
-        fitView
-        minZoom={0.1}
-        maxZoom={1.5}
+        onEdgeClick={onEdgeClick}
+        // NO fitView prop — we call fitView() programmatically only on first
+        // load or when the JSON root changes. This matches JSONCrack: adding
+        // items keeps zoom constant; the root node moves to stay vertically
+        // centered in the layout.
+        minZoom={0.05}
+        maxZoom={20}
         panOnDrag={!isLocked}
         zoomOnScroll={!isLocked}
         zoomOnPinch={!isLocked}
@@ -79,8 +116,8 @@ const GraphViewContent: React.FC<GraphViewProps> = ({ nodes, edges }) => {
         panOnScroll={!isLocked}
         elementsSelectable={!isLocked}
         defaultEdgeOptions={{
-          type: 'smoothstep',
-          animated: true,
+          type: 'custom',
+          animated: false,
           style: { stroke: isDark ? '#52525b' : '#d4d4d8', strokeWidth: 1.5 },
         }}
         proOptions={{ hideAttribution: true }}
