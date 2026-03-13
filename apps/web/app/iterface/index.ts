@@ -1,1 +1,1 @@
-export type ShareType = "json" | "text";
+export type ShareType = 'json' | 'text' | 'markdown'
