@@ -24,6 +24,7 @@ import { getJsonParseError } from '@/lib/json-error'
 import { getSocket } from '@/lib/socket'
 
 import { ModalAlert } from '../components/ui/ModalAlert'
+import { Toast } from '../components/ui/Toast'
 import { SharePopover } from '../components/SharePopover'
 import Cookies from 'js-cookie'
 
@@ -143,6 +144,8 @@ export default function Home({
     severity?: 'error' | 'warning'
   } | null>(null)
 
+  const [toastState, setToastState] = useState({ isOpen: false, message: '' })
+
   const effectiveValidationError = jsonValidationError || monacoValidationError
   const isDocValid =
     isJsonValid &&
@@ -258,9 +261,19 @@ export default function Home({
   // Track whether this is the first mount — SSR already provided initialRecord, no need to re-fetch
   const isInitialMountRef = React.useRef(!!initialRecord)
 
+  // Ref to prevent initial fetch when we JUST created the slug via auto-save
+  const justAutoSavedSlugRef = React.useRef<string | null>(null)
+
   // Sync state when URL slug changes (Navigation / Refresh)
   useEffect(() => {
     if (urlSlug) {
+      // If we just generated this slug from typing locally, do NOT fetch from DB.
+      // This prevents a race condition where fetching overwrites the user's current unsaved keystrokes.
+      if (justAutoSavedSlugRef.current === urlSlug) {
+        justAutoSavedSlugRef.current = null
+        return
+      }
+
       // On the very first mount, SSR already hydrated state from initialRecord — skip the fetch
       if (isInitialMountRef.current) {
         isInitialMountRef.current = false
@@ -304,22 +317,23 @@ export default function Home({
             ? '# Hello Markdown\n\nStart typing...'
             : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
 
-      if (documentSlug !== null) {
-        setCurrentJsonContent(defaultContent)
-        setDocumentSlug(null)
-        setIsDocumentPrivate(false)
-        setUserAccessLevel('viewer')
-        setDocumentType(featureMode)
+      // Reset the state to an empty un-saved document canvas
+      setCurrentJsonContent(defaultContent)
+      setDocumentSlug(null)
+      setIsDocumentPrivate(false)
+      setUserAccessLevel('viewer')
+      setDocumentType(featureMode)
+      if (featureMode !== 'text' && featureMode !== 'markdown') {
         setCurrentViewMode('visualize')
-        setIsCurrentUserOwner(true)
-        setHasEditPermission(true)
-        setSyncedRemoteContent({ code: defaultContent, nonce: Date.now() })
-        lastPersistedContentRef.current = defaultContent
-        resetWorker()
       }
+      setIsCurrentUserOwner(true)
+      setHasEditPermission(true)
+      setSyncedRemoteContent({ code: defaultContent, nonce: Date.now() })
+      lastPersistedContentRef.current = defaultContent
+      resetWorker()
       setIsPageLoading(false)
     }
-  }, [urlSlug, featureMode, syncFromData])
+  }, [urlSlug, featureMode, syncFromData, resetWorker])
 
   // Sync currentViewMode with URL parameter changes (for browser back/forward navigation)
   useEffect(() => {
@@ -871,7 +885,7 @@ export default function Home({
       }
 
       setIsShareModalOpen(false)
-      triggerAlert('Link Copied', message, 'success')
+      setToastState({ isOpen: true, message })
     } catch (e) {
       console.error(e)
       triggerAlert('Share Failed', (e as Error).message, 'error')
@@ -1041,16 +1055,23 @@ export default function Home({
             addOwnership(data.slug)
             lastPersistedContentRef.current = debouncedContentForAutoSave
 
-            const route = isText ? '/editor/text/' : '/editor/'
-            const viewParam = isText ? '' : `?view=${currentViewMode}`
+            const resolvedType = data.type || documentType
+            const route =
+              resolvedType === 'text'
+                ? '/editor/text/'
+                : resolvedType === 'markdown'
+                  ? '/editor/markdown/'
+                  : '/editor/'
+            const viewParam =
+              resolvedType === 'text' || resolvedType === 'markdown'
+                ? ''
+                : `?view=${currentViewMode}`
             const newUrl = `${route}${data.slug}${viewParam}`
 
-            // Use replaceState for silent background URL update
-            window.history.replaceState(
-              { ...window.history.state, as: newUrl, url: newUrl },
-              '',
-              newUrl
-            )
+            // Use Next.js router.replace for silent background URL update instead of raw history API.
+            // This ensures Next.js knows the route changed, so clicking "New JSON" later correctly navigates back.
+            justAutoSavedSlugRef.current = data.slug
+            router.replace(newUrl, { scroll: false })
           }
         })
         .catch((e) => console.error('Auto-create failed', e))
@@ -1539,6 +1560,13 @@ export default function Home({
         title={alertState.title}
         message={alertState.message}
         type={alertState.type}
+        forceLightMode={documentType === 'text'}
+      />
+
+      <Toast
+        isOpen={toastState.isOpen}
+        message={toastState.message}
+        onClose={() => setToastState((prev) => ({ ...prev, isOpen: false }))}
         forceLightMode={documentType === 'text'}
       />
 

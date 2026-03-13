@@ -68,7 +68,7 @@ const EditorHeader = ({
 
         {/* New JSON */}
         <EditorActionBtn
-          onClick={() => onCreateNewDocument('json')}
+          href='/editor'
           documentType={documentType}
           label='New JSON'
           title='Create New JSON'
@@ -78,7 +78,7 @@ const EditorHeader = ({
 
         {/* New Text */}
         <EditorActionBtn
-          onClick={() => onCreateNewDocument('text')}
+          href='/editor/text'
           documentType={documentType}
           label='New Text'
           title='Create New Text Chat'
@@ -88,7 +88,7 @@ const EditorHeader = ({
 
         {/* New Markdown */}
         <EditorActionBtn
-          onClick={() => onCreateNewDocument('markdown')}
+          href='/editor/markdown'
           documentType={documentType}
           label='New Markdown'
           title='Create New Markdown'
@@ -100,14 +100,12 @@ const EditorHeader = ({
       {/* Mobile Actions (Visible only on small screens) */}
       <div className='flex md:hidden items-center gap-1.5'>
         <EditorActionBtn
-          onClick={() =>
-            onCreateNewDocument(
-              documentType === 'text'
-                ? 'text'
-                : documentType === 'markdown'
-                  ? 'markdown'
-                  : 'json'
-            )
+          href={
+            documentType === 'text'
+              ? '/editor/text'
+              : documentType === 'markdown'
+                ? '/editor/markdown'
+                : '/editor'
           }
           documentType={documentType}
           label='New'

@@ -1,3 +1,5 @@
-import NewTextDocPage from "../editor/text/new/page";
+import { redirect } from 'next/navigation'
 
-export default NewTextDocPage;
+export default function NewPageRedirect() {
+  redirect('/editor/text')
+}
