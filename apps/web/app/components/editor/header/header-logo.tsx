@@ -15,7 +15,9 @@ const HeaderLogo = ({ type, slug, isValid, viewMode }: Props) => {
   const onClickNavigation = slug
     ? type === 'text'
       ? `/editor/text/${slug}`
-      : `/editor/${slug}?view=${viewMode}`
+      : type === 'markdown'
+        ? `/editor/markdown/${slug}`
+        : `/editor/${slug}?view=${viewMode}`
     : `?view=${viewMode}`
 
   const handleLogoClick = () => {
@@ -58,7 +60,7 @@ const HeaderLogo = ({ type, slug, isValid, viewMode }: Props) => {
           )}
         />
       </div>
-      {!isValid && (
+      {!isValid && type === 'json' && (
         <span className='px-2 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] sm:text-xs font-medium whitespace-nowrap'>
           Invalid
         </span>

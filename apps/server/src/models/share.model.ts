@@ -3,7 +3,7 @@ import { ModeEnum, AccessTypeEnum, ShareTypeEnum } from '../enums/enum'
 
 export type JsonShareMode = 'visualize' | 'tree' | 'formatter'
 export type ShareAccessType = 'editor' | 'viewer'
-export type ShareType = 'json' | 'text'
+export type ShareType = 'json' | 'text' | 'markdown'
 
 export interface IShareLink extends Document {
   slug: string

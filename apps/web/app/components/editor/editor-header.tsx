@@ -1,6 +1,13 @@
 import { ShareType } from '@/app/iterface'
 import { cn } from '@/lib/utils'
-import { Braces, File, Home, LinkIcon, UploadCloud } from 'lucide-react'
+import {
+  Braces,
+  File,
+  FileText,
+  Home,
+  LinkIcon,
+  UploadCloud,
+} from 'lucide-react'
 import { ThemeToggle } from '../button/theme-toggle'
 import HeaderLogo from './header/header-logo'
 import SaveStatus from './header/save-status'
@@ -49,7 +56,7 @@ const EditorHeader = ({
       {/* Center Zone: Primary Actions */}
       <div className='absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:flex items-center gap-2'>
         {/* Upload Button */}
-        {documentType !== 'text' && (
+        {documentType !== 'text' && documentType !== 'markdown' && (
           <EditorActionBtn
             onClick={() => onOpenUploadModal(true)}
             documentType={documentType}
@@ -66,6 +73,7 @@ const EditorHeader = ({
           label='New JSON'
           title='Create New JSON'
           icon={<Braces size={14} />}
+          isActive={documentType === 'json'}
         />
 
         {/* New Text */}
@@ -75,6 +83,17 @@ const EditorHeader = ({
           label='New Text'
           title='Create New Text Chat'
           icon={<File size={14} />}
+          isActive={documentType === 'text'}
+        />
+
+        {/* New Markdown */}
+        <EditorActionBtn
+          onClick={() => onCreateNewDocument('markdown')}
+          documentType={documentType}
+          label='New Markdown'
+          title='Create New Markdown'
+          icon={<FileText size={14} />}
+          isActive={documentType === 'markdown'}
         />
       </div>
 
@@ -82,7 +101,13 @@ const EditorHeader = ({
       <div className='flex md:hidden items-center gap-1.5'>
         <EditorActionBtn
           onClick={() =>
-            onCreateNewDocument(documentType === 'text' ? 'text' : 'json')
+            onCreateNewDocument(
+              documentType === 'text'
+                ? 'text'
+                : documentType === 'markdown'
+                  ? 'markdown'
+                  : 'json'
+            )
           }
           documentType={documentType}
           label='New'

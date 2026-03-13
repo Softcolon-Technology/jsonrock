@@ -12,4 +12,5 @@ export enum AccessTypeEnum {
 export enum ShareTypeEnum {
   JSON = 'json',
   TEXT = 'text',
+  MARKDOWN = 'markdown',
 }

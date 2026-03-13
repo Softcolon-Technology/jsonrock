@@ -41,6 +41,10 @@ const RichTextEditor = dynamic(() => import('../components/RichTextEditor'), {
   ssr: false,
 })
 
+const MarkdownEditor = dynamic(() => import('../components/MarkdownEditor'), {
+  ssr: false,
+})
+
 export type JsonShareMode = 'visualize' | 'tree' | 'formatter'
 
 export type ShareAccessType = 'editor' | 'viewer'
@@ -92,7 +96,9 @@ export default function Home({
       ? initialRecord.json
       : effectiveFeatureMode === 'text'
         ? '<p style="font-size: 14pt">Type your text here...</p>'
-        : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+        : effectiveFeatureMode === 'markdown'
+          ? '# Hello Markdown\n\nStart typing...'
+          : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
   )
 
   const lastPersistedContentRef = React.useRef<string>(
@@ -284,7 +290,9 @@ export default function Home({
       const defaultContent =
         featureMode === 'text'
           ? '<p style="font-size: 14pt">Type your text here...</p>'
-          : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+          : featureMode === 'markdown'
+            ? '# Hello Markdown\n\nStart typing...'
+            : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
 
       if (documentSlug !== null) {
         setCurrentJsonContent(defaultContent)
@@ -503,9 +511,12 @@ export default function Home({
     const targetType =
       typeof specificType === 'string' ? specificType : documentType
     const isText = targetType === 'text'
+    const isMarkdown = targetType === 'markdown'
     const initialContent = isText
       ? '<p style="font-size: 14pt">Type your text here...</p>'
-      : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+      : isMarkdown
+        ? '# Hello Markdown\n\nStart typing...'
+        : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
 
     setCurrentJsonContent(initialContent)
     setDocumentSlug(null)
@@ -520,7 +531,7 @@ export default function Home({
     })
 
     // Set view mode to formatter for JSON documents
-    if (!isText) {
+    if (!isText && !isMarkdown) {
       setCurrentViewMode('formatter')
     }
 
@@ -532,7 +543,7 @@ export default function Home({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           json: initialContent,
-          mode: isText ? currentViewMode : 'formatter', // Use formatter for new JSON
+          mode: isText || isMarkdown ? currentViewMode : 'formatter', // Use formatter for new JSON
           type: targetType,
           accessType: 'editor',
         }),
@@ -547,8 +558,15 @@ export default function Home({
         addOwnership(data.slug)
 
         const route =
-          (data.type || targetType) === 'text' ? '/editor/text/' : '/editor/'
-        const viewParam = targetType === 'text' ? '' : '?view=formatter'
+          (data.type || targetType) === 'text'
+            ? '/editor/text/'
+            : (data.type || targetType) === 'markdown'
+              ? '/editor/markdown/'
+              : '/editor/'
+        const viewParam =
+          targetType === 'text' || targetType === 'markdown'
+            ? ''
+            : '?view=formatter'
         const newUrl = `${route}${data.slug}${viewParam}`
 
         // Use pushState to update URL without refresh
@@ -679,10 +697,15 @@ export default function Home({
     const file = e.target.files?.[0]
     if (!file) return
 
-    if (file.type !== 'application/json' && !file.name.endsWith('.json')) {
+    const isJson =
+      file.type === 'application/json' || file.name.endsWith('.json')
+    const isMarkdown = file.name.endsWith('.md') || file.name.endsWith('.mdx')
+    const isText = file.type === 'text/plain' || file.name.endsWith('.txt')
+
+    if (!isJson && !isMarkdown && !isText) {
       triggerAlert(
         'Upload Failed',
-        'Please select a valid .json file.',
+        'Please select a valid .json, .md, or .txt file.',
         'error'
       )
       e.target.value = '' // Reset input
@@ -717,12 +740,21 @@ export default function Home({
       }
 
       // Success - Update state locally and change URL in-place
-      setCurrentViewMode('formatter')
-      setDocumentType('json')
+      const targetType = isJson ? 'json' : isMarkdown ? 'markdown' : 'text'
+      if (isJson) setCurrentViewMode('formatter')
+      setDocumentType(targetType)
       setDocumentSlug(data.slug)
       addOwnership(data.slug)
 
-      const newUrl = `/editor/${data.slug}?view=formatter`
+      const routePrefix =
+        targetType === 'json'
+          ? '/editor/'
+          : targetType === 'markdown'
+            ? '/editor/markdown/'
+            : '/editor/text/'
+      const viewQuery = isJson ? '?view=formatter' : ''
+      const newUrl = `${routePrefix}${data.slug}${viewQuery}`
+
       window.history.pushState(
         { ...window.history.state, as: newUrl, url: newUrl },
         '',
@@ -791,9 +823,16 @@ export default function Home({
         setDocumentSlug(newSlug)
         addOwnership(newSlug) // Mark as owner of new/updated slug
 
-        const route = documentType === 'text' ? '/editor/text/' : '/editor/'
+        const route =
+          documentType === 'text'
+            ? '/editor/text/'
+            : documentType === 'markdown'
+              ? '/editor/markdown/'
+              : '/editor/'
         const viewParam =
-          documentType === 'text' ? '' : `?view=${currentViewMode}`
+          documentType === 'text' || documentType === 'markdown'
+            ? ''
+            : `?view=${currentViewMode}`
         const newUrl = `${route}${newSlug}${viewParam}`
 
         // Update URL in-place
@@ -1027,9 +1066,9 @@ export default function Home({
             }
             className={cn(
               'border-b lg:border-b-0 lg:border-r border-zinc-200 flex flex-col bg-white h-full',
-              documentType !== 'text' &&
+              documentType === 'json' &&
                 'dark:border-zinc-900 dark:bg-[#09090b]',
-              documentType === 'text'
+              documentType !== 'json'
                 ? 'w-full'
                 : 'w-full lg:w-[var(--left-panel-width)] lg:min-w-[300px]',
               // Mobile visibility toggle
@@ -1045,6 +1084,14 @@ export default function Home({
                   readOnly={!hasEditPermission}
                   remoteContent={syncedRemoteContent?.code}
                   forceLightMode={true}
+                />
+              </div>
+            ) : documentType === 'markdown' ? (
+              <div className='flex-1 h-full relative'>
+                <MarkdownEditor
+                  content={currentJsonContent}
+                  onChange={onJsonContentChange}
+                  readOnly={!hasEditPermission}
                 />
               </div>
             ) : (
@@ -1146,7 +1193,7 @@ export default function Home({
           </div>
 
           {/* Resizer Handle */}
-          {documentType !== 'text' && (
+          {documentType === 'json' && (
             <div
               className={`hidden lg:flex w-1 bg-transparent cursor-col-resize z-40 items-center justify-center transition-colors`}
               onMouseDown={startResizing}
@@ -1155,7 +1202,7 @@ export default function Home({
             </div>
           )}
 
-          {/* View Pane (Right/Bottom) */}
+          {/* View Pane (Right/Bottom) — only for JSON type */}
           <div
             style={
               {
@@ -1166,11 +1213,9 @@ export default function Home({
               'bg-gray-50 dark:bg-[#050505] relative overflow-hidden h-full',
               'w-full lg:w-[var(--right-panel-width)]',
               // Mobile visibility toggle
-              // Mobile visibility toggle
-              // Mobile visibility toggle
               mobileTab === 'viewer'
                 ? 'flex flex-col'
-                : documentType === 'text'
+                : documentType !== 'json'
                   ? 'hidden'
                   : 'hidden lg:flex lg:flex-col'
             )}
@@ -1396,7 +1441,7 @@ export default function Home({
             <div className='flex items-center justify-between mb-4'>
               <h3 className='text-lg font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2'>
                 <UploadCloud size={20} className='text-emerald-500' />
-                Upload JSON File
+                Upload Document
               </h3>
               <button
                 onClick={() => setIsUploadModalOpen(false)}
@@ -1415,11 +1460,13 @@ export default function Home({
                 <p className='text-sm font-medium text-zinc-900 dark:text-zinc-100'>
                   Click to select file
                 </p>
-                <p className='text-xs text-zinc-500 mt-1'>.json files only</p>
+                <p className='text-xs text-zinc-500 mt-1'>
+                  .json, .md, .txt supported
+                </p>
                 <input
                   ref={fileInputRef}
                   type='file'
-                  accept='application/json,.json'
+                  accept='application/json,.json,.md,.txt,text/plain'
                   className='hidden'
                   onChange={handleUploadFile}
                 />

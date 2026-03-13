@@ -9,7 +9,8 @@ node_modules
 .pnp.js
 
 # Local env files
-.env
+.env*
+!.env.example
 /apps/web/.env
 /apps/server/.env
 
