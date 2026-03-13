@@ -12,7 +12,7 @@ const MIN_NODE_WIDTH = 45
 const layoutOptions = {
   'elk.algorithm': 'layered',
   'elk.direction': 'RIGHT',
-  'elk.layered.spacing.nodeNodeBetweenLayers': '140',
+  'elk.layered.spacing.nodeNodeBetweenLayers': '120',
   'elk.spacing.nodeNode': '80', // Increased to spread children more for better fan-out visibility
   'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
   'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
@@ -384,5 +384,76 @@ export const getLayoutedElements = async (json: any) => {
   } catch (e) {
     console.error('ELK Layout failed', e)
     return { nodes, edges }
+  }
+}
+
+// ── Web Worker Integration ───────────────────────────────────────────────────
+// This function takes the PRE-BUILT nodes and edges from the Web Worker
+// and runs ELK layout on the main thread (since ELK is fast enough when
+// it doesn't have to recursively build the graph itself, and importing it
+// inside the worker requires external CDN scripts which can fail).
+export async function applyElkLayout(
+  rfNodes: Node[],
+  rfEdges: Edge[],
+  elkNodes: { id: string; width: number; height: number }[],
+  elkEdges: { id: string; source: string; target: string }[],
+  options: Record<string, string>
+): Promise<{ nodes: Node[]; edges: Edge[] }> {
+  if (rfNodes.length === 0) return { nodes: [], edges: [] }
+
+  const graph: ElkNode = {
+    id: 'root',
+    layoutOptions: options,
+    children: elkNodes,
+    edges: elkEdges as any,
+  }
+
+  try {
+    const layoutedGraph = await elk.layout(graph)
+
+    // Apply ELK positions to React Flow nodes
+    layoutedGraph.children?.forEach((layoutNode) => {
+      const matchingNode = rfNodes.find((n) => n.id === layoutNode.id)
+      if (matchingNode) {
+        matchingNode.position = { x: layoutNode.x || 0, y: layoutNode.y || 0 }
+      }
+    })
+
+    // ── Center root node vertically between its direct children ────────────
+    const rootNode = rfNodes.find((n) => n.data.isRoot)
+    if (rootNode) {
+      const rootEdgeTargets = rfEdges
+        .filter((e) => e.source === rootNode.id)
+        .map((e) => e.target)
+      const directChildren = rfNodes.filter((n) =>
+        rootEdgeTargets.includes(n.id)
+      )
+
+      if (directChildren.length > 0) {
+        const elkHeightMap = new Map(
+          (layoutedGraph.children ?? []).map((n) => [
+            n.id,
+            n.height ?? PARENT_HEIGHT,
+          ])
+        )
+        const childTops = directChildren.map((n) => n.position.y)
+        const childBottoms = directChildren.map(
+          (n) => n.position.y + (elkHeightMap.get(n.id) ?? PARENT_HEIGHT)
+        )
+        const minTop = Math.min(...childTops)
+        const maxBottom = Math.max(...childBottoms)
+        const rootHeight = elkHeightMap.get(rootNode.id) ?? PARENT_HEIGHT
+
+        rootNode.position = {
+          x: rootNode.position.x,
+          y: (minTop + maxBottom) / 2 - rootHeight / 2,
+        }
+      }
+    }
+
+    return { nodes: rfNodes, edges: rfEdges }
+  } catch (e) {
+    console.error('ELK Layout failed', e)
+    return { nodes: rfNodes, edges: rfEdges }
   }
 }

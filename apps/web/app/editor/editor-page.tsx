@@ -30,7 +30,8 @@ import Cookies from 'js-cookie'
 import JsonEditor from '../components/JsonEditor'
 import GraphView from '../components/GraphView'
 import TreeExplorer from '../components/TreeExplorer'
-import { getLayoutedElements } from '@/lib/graph-layout'
+import { getLayoutedElements, applyElkLayout } from '@/lib/graph-layout'
+import { useJsonWorker, TreeNodeSlim } from '@/hooks/useJsonWorker'
 import { cn } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
 import dynamic from 'next/dynamic'
@@ -105,10 +106,18 @@ export default function Home({
     initialRecord?.json || currentJsonContent
   )
 
-  const [parsedJsonData, setParsedJsonData] = useState<any>(null)
+  // Use the new Web Worker for off-thread parsing and tree/graph building
+  const {
+    processJson,
+    reset: resetWorker,
+    state: workerState,
+  } = useJsonWorker()
+
   const [isEditorReady, setIsEditorReady] = useState(false)
   const [graphNodes, setGraphNodes] = useState<Node[]>([])
   const [graphEdges, setGraphEdges] = useState<Edge[]>([])
+  const [treeNodes, setTreeNodes] = useState<TreeNodeSlim[]>([])
+  const [parsedJsonData, setParsedJsonData] = useState<any>(null)
   const [currentViewMode, setCurrentViewMode] = useState<
     'visualize' | 'tree' | 'formatter'
   >(effectiveViewMode)
@@ -117,6 +126,7 @@ export default function Home({
     useState<ShareType>(effectiveFeatureMode)
 
   const [isJsonValid, setIsJsonValid] = useState<boolean>(true)
+  const [isGraphTooLarge, setIsGraphTooLarge] = useState<boolean>(false)
   const [isLayoutCalculating, setIsLayoutCalculating] = useState<boolean>(
     effectiveViewMode === 'visualize'
   )
@@ -303,9 +313,9 @@ export default function Home({
         setCurrentViewMode('visualize')
         setIsCurrentUserOwner(true)
         setHasEditPermission(true)
-        setParsedJsonData(null)
         setSyncedRemoteContent({ code: defaultContent, nonce: Date.now() })
         lastPersistedContentRef.current = defaultContent
+        resetWorker()
       }
       setIsPageLoading(false)
     }
@@ -870,48 +880,95 @@ export default function Home({
     }
   }
 
-  // Debounce the input for Layout calculations (500ms)
+  // Debounce the input to avoid thrashing the worker
   const debouncedJsonContent = useDebounce(currentJsonContent, 500)
 
-  // Layout Effect - Depends on debounced input
+  // Send content to Web Worker for processing
   useEffect(() => {
     if (!debouncedJsonContent || !debouncedJsonContent.trim()) {
-      setParsedJsonData(null)
+      resetWorker()
       setIsJsonValid(true)
       setGraphNodes([])
       setGraphEdges([])
+      setTreeNodes([])
+      setParsedJsonData(null)
+      setJsonValidationError(null)
+      setIsGraphTooLarge(false)
+      return
+    }
+
+    if (documentType === 'text') {
+      setIsJsonValid(true)
       setJsonValidationError(null)
       return
     }
 
+    // Try a standard JSON.parse just to check validity and catch syntax errors fast,
+    // but don't store the result! Only the worker stores the tree.
     try {
-      if (documentType === 'text') {
-        setIsJsonValid(true)
-        setJsonValidationError(null)
-        return
-      }
       const parsed = JSON.parse(debouncedJsonContent)
       setParsedJsonData(parsed)
       setIsJsonValid(true)
       setJsonValidationError(null)
-
-      if (currentViewMode === 'visualize') {
-        setIsLayoutCalculating(true)
-        getLayoutedElements(parsed).then(
-          ({ nodes: layoutedNodes, edges: layoutedEdges }) => {
-            setGraphNodes(layoutedNodes)
-            setGraphEdges(layoutedEdges)
-            setIsLayoutCalculating(false)
-          }
-        )
-      }
+      // Send to worker for heavy processing
+      processJson(debouncedJsonContent)
     } catch (e) {
       setIsJsonValid(false)
       if (e instanceof SyntaxError) {
         setJsonValidationError(getJsonParseError(debouncedJsonContent, e))
       }
     }
-  }, [debouncedJsonContent, currentViewMode])
+  }, [debouncedJsonContent, documentType, processJson, resetWorker])
+
+  // Listen to Worker Results and run ELK layout
+  useEffect(() => {
+    if (workerState.status === 'error') {
+      setIsJsonValid(false)
+    } else if (workerState.status === 'ready') {
+      const {
+        rfNodes,
+        rfEdges,
+        elkNodes,
+        elkEdges,
+        treeNodes: newTreeNodes,
+        layoutOptions,
+      } = workerState.result
+
+      // Tree view data is ready immediately (virtualized, flat list)
+      setTreeNodes(newTreeNodes)
+
+      if (rfNodes.length > 1000) {
+        setIsGraphTooLarge(true)
+        setGraphNodes([])
+        setGraphEdges([])
+        setIsLayoutCalculating(false)
+      } else {
+        setIsGraphTooLarge(false)
+        // Graph view needs ELK layout run on the un-positioned nodes
+        if (currentViewMode === 'visualize') {
+          setIsLayoutCalculating(true)
+          applyElkLayout(
+            rfNodes,
+            rfEdges,
+            elkNodes,
+            elkEdges,
+            layoutOptions
+          ).then(({ nodes: layoutedNodes, edges: layoutedEdges }) => {
+            setGraphNodes(layoutedNodes)
+            setGraphEdges(layoutedEdges)
+            setIsLayoutCalculating(false)
+          })
+        } else {
+          // If we're not in graph mode, we don't strictly need to run ELK,
+          // but we can save the unpositioned nodes just in case they switch back.
+          // Running it lazy on switch requires keeping the worker result in state,
+          // so for now we'll just let the switch re-trigger the worker if needed.
+          setGraphNodes([])
+          setGraphEdges([])
+        }
+      }
+    }
+  }, [workerState, currentViewMode])
 
   const handleEditorValidation = useCallback((markers: any[]) => {
     // Monaco MarkerSeverity: 8 = Error, 4 = Warning
@@ -1014,14 +1071,39 @@ export default function Home({
     setTimeout(() => setIsClipboardCopied(false), 2000)
   }
 
-  // Computed Formatted Output
-  const formattedOutput = React.useMemo(() => {
-    if (!parsedJsonData) return ''
-    if (indentationSize === 'minify') {
-      return JSON.stringify(parsedJsonData)
+  const handleDownload = () => {
+    try {
+      if (!currentJsonContent) return
+      const blob = new Blob([currentJsonContent], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = documentSlug ? `${documentSlug}.json` : 'data.json'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error('Download failed', e)
     }
-    return JSON.stringify(parsedJsonData, null, Number(indentationSize))
-  }, [parsedJsonData, indentationSize])
+  }
+
+  const formattedOutput = React.useMemo(() => {
+    if (!currentJsonContent) return ''
+    try {
+      // If we already typed valid JSON, format it
+      if (documentType === 'json' && isJsonValid) {
+        return JSON.stringify(
+          JSON.parse(currentJsonContent),
+          null,
+          Number(indentationSize)
+        )
+      }
+      return currentJsonContent
+    } catch {
+      return currentJsonContent
+    }
+  }, [currentJsonContent, indentationSize, documentType, isJsonValid])
 
   // Mobile specific view state
   const [mobileTab, setMobileTab] = useState<'editor' | 'viewer'>('editor')
@@ -1329,7 +1411,7 @@ export default function Home({
             </div>
             {/* Output Panel: only render after editor mounted and (if graph mode) layout is computed */}
             {isEditorReady &&
-              (isJsonValid && !parsedJsonData ? (
+              (isJsonValid && workerState.status !== 'ready' ? (
                 <div className='h-full w-full flex flex-col items-center justify-center pl-16 animate-in fade-in zoom-in-95 duration-200'>
                   <div className='mb-4 p-4 rounded-full bg-zinc-200 dark:bg-zinc-800/50'>
                     <Code2 size={48} className='opacity-50 text-zinc-400' />
@@ -1349,16 +1431,40 @@ export default function Home({
                       currentViewMode !== 'visualize' && 'hidden'
                     )}
                   >
-                    {/* GraphView is ALWAYS mounted — never unmounted on JSON change.
-                        This preserves React Flow's internal zoom/viewport state and
-                        our hasFitOnce ref. Loading state is shown as an overlay instead. */}
-                    <GraphView nodes={graphNodes} edges={graphEdges} />
-
-                    {/* Loading overlay — shown while ELK is computing new layout */}
-                    {isLayoutCalculating && (
-                      <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/60 dark:bg-zinc-950/60 backdrop-blur-sm'>
-                        <div className='w-5 h-5 border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300 rounded-full animate-spin' />
+                    {isGraphTooLarge ? (
+                      <div className='h-full w-full flex flex-col items-center justify-center animate-in fade-in duration-200'>
+                        <div className='mb-4 p-4 rounded-full bg-orange-100 dark:bg-orange-900/30'>
+                          <LayoutTemplate
+                            size={48}
+                            className='text-orange-500 dark:text-orange-400'
+                          />
+                        </div>
+                        <h3 className='text-lg font-semibold text-zinc-700 dark:text-zinc-200'>
+                          Graph Too Large
+                        </h3>
+                        <p className='max-w-md text-center text-sm text-zinc-500 mt-2'>
+                          This JSON data contains over 1000 nodes, which may
+                          cause performance issues in the Graph View.
+                          <br />
+                          <br />
+                          Please use the <strong>Tree Explorer</strong> or{' '}
+                          <strong>JSON Formatter</strong> to view this data.
+                        </p>
                       </div>
+                    ) : (
+                      <>
+                        {/* GraphView is ALWAYS mounted — never unmounted on JSON change.
+                            This preserves React Flow's internal zoom/viewport state and
+                            our hasFitOnce ref. Loading state is shown as an overlay instead. */}
+                        <GraphView nodes={graphNodes} edges={graphEdges} />
+
+                        {/* Loading overlay — shown while ELK is computing new layout */}
+                        {isLayoutCalculating && (
+                          <div className='absolute inset-0 z-10 flex items-center justify-center bg-white/60 dark:bg-zinc-950/60 backdrop-blur-sm'>
+                            <div className='w-5 h-5 border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-300 rounded-full animate-spin' />
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
 
@@ -1368,7 +1474,9 @@ export default function Home({
                       currentViewMode !== 'tree' && 'hidden'
                     )}
                   >
-                    <TreeExplorer data={parsedJsonData} />
+                    {currentViewMode === 'tree' && parsedJsonData !== null && (
+                      <TreeExplorer data={parsedJsonData} />
+                    )}
                   </div>
 
                   <div
