@@ -91,7 +91,7 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
   code: ({ inline, className, children, ...props }: any) => {
     if (inline) {
       return (
-        <code className='px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 font-mono text-[0.875em] border border-zinc-200 dark:border-zinc-700'>
+        <code className='px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800/50 text-emerald-600 dark:text-emerald-400 font-mono text-[0.875em] border border-zinc-200 dark:border-zinc-700/50'>
           {children}
         </code>
       )
@@ -103,7 +103,7 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
     )
   },
   pre: ({ children }) => (
-    <pre className='bg-zinc-950 dark:bg-zinc-900 border border-zinc-800 rounded-lg p-4 my-4 overflow-x-auto text-zinc-100 text-sm font-mono leading-relaxed shadow-md'>
+    <pre className='bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 my-4 overflow-x-auto text-zinc-800 dark:text-zinc-200 text-sm font-mono leading-relaxed shadow-sm'>
       {children}
     </pre>
   ),

@@ -727,29 +727,54 @@ export default function Home({
   const [isFileUploading, setIsFileUploading] = useState(false)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
-  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const [isDragOver, setIsDragOver] = useState(false)
 
+  const processSelectedFile = async (file: File) => {
     const isJson =
       file.type === 'application/json' || file.name.endsWith('.json')
     const isMarkdown = file.name.endsWith('.md') || file.name.endsWith('.mdx')
     const isText = file.type === 'text/plain' || file.name.endsWith('.txt')
 
-    if (!isJson && !isMarkdown && !isText) {
-      triggerAlert(
-        'Upload Failed',
-        'Please select a valid .json, .md, or .txt file.',
-        'error'
-      )
-      e.target.value = '' // Reset input
-      setIsUploadModalOpen(false)
-      return
+    // Restrict based on currently active documentType
+    if (documentType === 'markdown') {
+      if (!isMarkdown) {
+        triggerAlert(
+          'Upload Failed',
+          'Please select a valid .md file.',
+          'error'
+        )
+        if (fileInputRef.current) fileInputRef.current.value = '' // Reset input
+        setIsUploadModalOpen(false)
+        return
+      }
+    } else if (documentType === 'json') {
+      if (!isJson) {
+        triggerAlert(
+          'Upload Failed',
+          'Please select a valid .json file.',
+          'error'
+        )
+        if (fileInputRef.current) fileInputRef.current.value = '' // Reset input
+        setIsUploadModalOpen(false)
+        return
+      }
+    } else {
+      // General validation for text or other modes
+      if (!isJson && !isMarkdown && !isText) {
+        triggerAlert(
+          'Upload Failed',
+          'Please select a valid .json, .md, or .txt file.',
+          'error'
+        )
+        if (fileInputRef.current) fileInputRef.current.value = '' // Reset input
+        setIsUploadModalOpen(false)
+        return
+      }
     }
 
     if (file.size > 2 * 1024 * 1024) {
       triggerAlert('Upload Failed', 'File size exceeds the 2MB limit.', 'error')
-      e.target.value = '' // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = '' // Reset input
       setIsUploadModalOpen(false)
       return
     }
@@ -807,6 +832,40 @@ export default function Home({
       triggerAlert('Upload Failed', (error as Error).message, 'error')
       setIsFileUploading(false)
     }
+  }
+
+  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    await processSelectedFile(file)
+  }
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Only allow drag for markdown
+    if (documentType === 'markdown') {
+      setIsDragOver(true)
+    }
+  }
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+
+    // Only allow drop for markdown
+    if (documentType !== 'markdown') return
+
+    const file = e.dataTransfer.files?.[0]
+    if (!file) return
+    await processSelectedFile(file)
   }
 
   const handleShareDocument = async (settings: {
@@ -1599,20 +1658,40 @@ export default function Home({
 
             <div className='space-y-4'>
               <div
-                className='p-8 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg flex flex-col items-center justify-center text-center hover:border-emerald-500/50 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors cursor-pointer'
+                className={cn(
+                  'p-8 border-2 border-dashed rounded-lg flex flex-col items-center justify-center text-center transition-colors cursor-pointer',
+                  isDragOver
+                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/10'
+                    : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/50 hover:bg-zinc-50 dark:hover:bg-zinc-900/50'
+                )}
                 onClick={() => fileInputRef.current?.click()}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
               >
                 <UploadCloud size={32} className='text-zinc-400 mb-2' />
                 <p className='text-sm font-medium text-zinc-900 dark:text-zinc-100'>
-                  Click to select file
+                  {documentType === 'markdown'
+                    ? 'Drag and drop or click to select'
+                    : 'Click to select file'}
                 </p>
                 <p className='text-xs text-zinc-500 mt-1'>
-                  .json, .md, .txt supported
+                  {documentType === 'markdown'
+                    ? '.md supported'
+                    : documentType === 'json'
+                      ? '.json supported'
+                      : '.json, .md, .txt supported'}
                 </p>
                 <input
                   ref={fileInputRef}
                   type='file'
-                  accept='application/json,.json,.md,.txt,text/plain'
+                  accept={
+                    documentType === 'markdown'
+                      ? '.md,.mdx,text/markdown'
+                      : documentType === 'json'
+                        ? 'application/json,.json'
+                        : 'application/json,.json,.md,.txt,text/plain'
+                  }
                   className='hidden'
                   onChange={handleUploadFile}
                 />

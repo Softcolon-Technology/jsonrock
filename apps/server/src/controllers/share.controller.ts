@@ -216,12 +216,19 @@ export class ShareController {
 
       const text = file.buffer.toString('utf-8')
 
-      // Validate JSON
-      try {
-        JSON.parse(text)
-      } catch {
-        res.status(400).json({ error: 'Invalid JSON file' })
-        return
+      const isMarkdown =
+        file.originalname?.toLowerCase().endsWith('.md') ||
+        file.originalname?.toLowerCase().endsWith('.mdx') ||
+        file.mimetype === 'text/markdown'
+
+      // Validate JSON only if it's not a markdown file
+      if (!isMarkdown) {
+        try {
+          JSON.parse(text)
+        } catch {
+          res.status(400).json({ error: 'Invalid JSON file' })
+          return
+        }
       }
 
       const record = await shareService.createShareLink({
@@ -229,7 +236,7 @@ export class ShareController {
         mode: ModeEnum.VISUALIZE, // Default or could be inferred
         isPrivate: false,
         accessType: AccessTypeEnum.EDITOR,
-        type: ShareTypeEnum.JSON,
+        type: isMarkdown ? ShareTypeEnum.MARKDOWN : ShareTypeEnum.JSON,
       })
 
       res.json({ slug: record.slug })
