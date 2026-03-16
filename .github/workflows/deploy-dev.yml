@@ -1,0 +1,28 @@
+name: CI/CD for Development Branch [Jsonrock]
+
+on:
+  push:
+    branches: ['development']
+
+jobs:
+  build:
+    runs-on: jsonrock-dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+
+      - name: Add Backend Envrionemnt Variables
+        run: cp /home/ankit/projects/jsonrock-dev/.env.backend .env apps/server/.env
+
+      - name: Add Frontend Envrionemnt Variables
+        run: cp /home/ankit/projects/jsonrock-dev/.env.frontend .env apps/web/.env
+
+      - name: Install Dependencies
+        run: pnpm install
+
+      - name: Build Application 
+        run: pnpm build
