@@ -26,3 +26,9 @@ jobs:
 
       - name: Build Application 
         run: pnpm build
+
+      - name: Restart Backend Application with PM2
+        run: pm2 restart be-jsonrock-dev
+
+      - name: Restart Frontend Application with PM2
+        run: pm2 restart fe-jsonrock-dev
