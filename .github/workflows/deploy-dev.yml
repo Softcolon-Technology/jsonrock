@@ -16,10 +16,10 @@ jobs:
         uses: actions/setup-node@v4
 
       - name: Add Backend Envrionemnt Variables
-        run: cp /home/ankit/projects/jsonrock-dev/.env.backend .env /home/ankit/projects/jsonrock-dev/_work/jsonrock/jsonrock/apps/server/.env
+        run: cp /home/ankit/projects/jsonrock-dev/.env.backend apps/server/.env
 
       - name: Add Frontend Envrionemnt Variables
-        run: cp /home/ankit/projects/jsonrock-dev/.env.frontend .env /home/ankit/projects/jsonrock-dev/_work/jsonrock/jsonrock/apps/web/.env
+        run: cp /home/ankit/projects/jsonrock-dev/.env.frontend apps/web/.env
 
       - name: Install Dependencies
         run: pnpm install
