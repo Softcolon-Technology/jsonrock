@@ -278,6 +278,16 @@ export default function Home({
       if (isInitialMountRef.current) {
         isInitialMountRef.current = false
         setIsPageLoading(false)
+
+        // CRITICAL FIX: SSR cannot access cookies, meaning initial renders on a deployed server
+        // will incorrectly default to "viewer" status for the owner.
+        // We must re-check the cookie immediately on the client side upon hydration.
+        const isOwnedOnClient = checkOwnership(urlSlug)
+        if (isOwnedOnClient) {
+          setIsCurrentUserOwner(true)
+          setHasEditPermission(true)
+        }
+
         return
       }
 
