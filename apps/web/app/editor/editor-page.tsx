@@ -1076,7 +1076,9 @@ export default function Home({
   useEffect(() => {
     // Auto-save in Text or JSON Mode, if editable, and has slug
     if (
-      (documentType === 'text' || documentType === 'json') &&
+      (documentType === 'text' ||
+        documentType === 'json' ||
+        documentType === 'markdown') &&
       documentSlug &&
       hasEditPermission &&
       !isPasswordLocked
@@ -1264,6 +1266,7 @@ export default function Home({
                   content={currentJsonContent}
                   onChange={onJsonContentChange}
                   readOnly={!hasEditPermission}
+                  onFileDrop={processSelectedFile}
                 />
               </div>
             ) : (
@@ -1277,6 +1280,7 @@ export default function Home({
                     onReady={() => setIsEditorReady(true)}
                     onValidate={handleEditorValidation}
                     readOnly={!hasEditPermission}
+                    onFileDrop={processSelectedFile}
                     options={{
                       padding: { top: 16, bottom: 100 }, // Ensure last lines are visible above floating alert
                     }}

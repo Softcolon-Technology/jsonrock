@@ -5,11 +5,14 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import { useDebounce } from '@/hooks/useDebounce'
+import { cn } from '@/lib/utils'
+import { UploadCloud } from 'lucide-react'
 
 interface MarkdownEditorProps {
   content: string
   onChange: (value: string) => void
   readOnly?: boolean
+  onFileDrop?: (file: File) => Promise<void>
 }
 
 // Custom components for every markdown element — fully styled for dark/light mode
@@ -159,9 +162,11 @@ export default function MarkdownEditor({
   content,
   onChange,
   readOnly = false,
+  onFileDrop,
 }: MarkdownEditorProps) {
   const [leftWidth, setLeftWidth] = useState(50)
   const [isDragging, setIsDragging] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const previewRef = React.useRef<HTMLDivElement>(null)
@@ -213,6 +218,32 @@ export default function MarkdownEditor({
     [isDragging]
   )
 
+  const handleDragOver = (e: React.DragEvent) => {
+    if (readOnly) return
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (readOnly) return
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    if (readOnly) return
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+
+    const file = e.dataTransfer.files?.[0]
+    if (file && onFileDrop) {
+      await onFileDrop(file)
+    }
+  }
+
   useEffect(() => {
     if (isDragging) {
       window.addEventListener('mousemove', resize)
@@ -233,11 +264,32 @@ export default function MarkdownEditor({
   return (
     <div
       ref={containerRef}
-      className='flex h-full w-full overflow-hidden bg-white dark:bg-[#050505] flex-col md:flex-row'
+      className='flex h-full w-full overflow-hidden bg-white dark:bg-[#050505] flex-col md:flex-row relative'
       style={{ '--editor-left-width': `${leftWidth}%` } as React.CSSProperties}
     >
       {/* Left Pane — Raw Editor */}
-      <div className='w-full md:w-[var(--editor-left-width)] min-w-[200px] border-r border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col'>
+      <div
+        className={cn(
+          'w-full md:w-[var(--editor-left-width)] min-w-[200px] border-r border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col relative transition-colors duration-200',
+          isDragOver ? 'bg-emerald-500/5 dark:bg-emerald-500/10' : ''
+        )}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {isDragOver && (
+          <div className='absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/60 dark:bg-black/60 backdrop-blur-[2px] pointer-events-none border-4 border-dashed border-emerald-500/50 rounded-lg animate-in fade-in duration-200'>
+            <div className='p-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 mb-4'>
+              <UploadCloud
+                size={48}
+                className='text-emerald-600 dark:text-emerald-400'
+              />
+            </div>
+            <p className='text-xl font-bold text-emerald-700 dark:text-emerald-300'>
+              Drop Markdown here
+            </p>
+          </div>
+        )}
         <div className='flex items-center px-4 py-1 bg-gradient-to-b from-gray-50 to-gray-100 dark:from-zinc-800 dark:to-zinc-900 border-b border-zinc-300 dark:border-zinc-700 h-11 shrink-0 gap-2'>
           <span className='text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider'>
             Markdown
