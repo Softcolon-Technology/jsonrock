@@ -13,9 +13,9 @@ import { Highlight } from '@tiptap/extension-highlight'
 import { Link as TiptapLink } from '@tiptap/extension-link'
 import { Image as TiptapImage } from '@tiptap/extension-image'
 import CodeBlock from '@tiptap/extension-code-block'
-import { Extension, Node as TiptapNode } from '@tiptap/core'
-import { PageNode } from './extensions/PageNode'
-import { PageManager } from './extensions/PageManager'
+import { Extension } from '@tiptap/core'
+import { ReactNodeViewRenderer } from '@tiptap/react'
+import { CodeBlockComponent } from './editor/CodeBlockComponent'
 import {
   Bold,
   Italic,
@@ -128,25 +128,6 @@ const TabKey = Extension.create({
   },
 })
 
-// Custom Document that contains pages
-const PageDocument = TiptapNode.create({
-  name: 'doc',
-  topNode: true,
-  content: 'page+',
-})
-
-// Helper to wrap content in a page if not already wrapped
-const ensurePageWrapper = (content: string): string => {
-  if (!content || content.trim() === '') {
-    return '<div data-page="true"><p></p></div>'
-  }
-  if (content.includes('data-page="true"') || content.includes('data-page=')) {
-    return content
-  }
-  // Wrap existing content in a page
-  return `<div data-page="true">${content}</div>`
-}
-
 interface RichTextEditorProps {
   content: string
   onChange: (html: string) => void
@@ -212,18 +193,31 @@ const Toolbar = ({
   )
 
   const getCurrentFontSize = () => {
-    if (!editor) return '14' // Default to 14
+    if (!editor) return '14'
     const markAttrs = editor.getAttributes('textStyle')
-    if (markAttrs.fontSize) return markAttrs.fontSize
+    if (markAttrs.fontSize) return markAttrs.fontSize.toString()
+
+    // Look up parent nodes (paragraph, heading, listItem)
     const { $from } = editor.state.selection
-    const parent = $from.parent
-    if (
-      (parent.type.name === 'paragraph' || parent.type.name === 'heading') &&
-      parent.attrs.fontSize
-    ) {
-      return parent.attrs.fontSize
+    for (let depth = $from.depth; depth > 0; depth--) {
+      const node = $from.node(depth)
+      if (node.attrs.fontSize) {
+        return node.attrs.fontSize.toString()
+      }
     }
-    return '14' // Default
+
+    return '14'
+  }
+
+  const detectedSize = getCurrentFontSize()
+  const fontSizeOptions = [
+    10, 11, 12, 13, 14, 15, 16, 18, 20, 24, 28, 32, 36, 40, 48, 60, 72, 96,
+  ]
+
+  // If detected size is not in list, add it temporarily
+  if (detectedSize && !fontSizeOptions.includes(parseInt(detectedSize))) {
+    fontSizeOptions.push(parseInt(detectedSize))
+    fontSizeOptions.sort((a, b) => a - b)
   }
 
   if (!editor) return null
@@ -255,7 +249,7 @@ const Toolbar = ({
       <ToolbarDivider forceLightMode={forceLightMode} />
 
       <select
-        value={getCurrentFontSize()}
+        value={detectedSize}
         onChange={handleFontSizeChange}
         className={cn(
           'h-7 px-1 text-xs border rounded bg-white border-zinc-200 text-zinc-700 min-w-[60px]',
@@ -263,11 +257,7 @@ const Toolbar = ({
             'dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300'
         )}
       >
-        {/* <option value="">Size</option> */}
-        {[
-          10, 11, 12, 13, 14, 15, 16, 18, 20, 24, 28, 32, 36, 40, 48, 60, 72,
-          96,
-        ].map((size) => (
+        {fontSizeOptions.map((size) => (
           <option key={size} value={size}>
             {size}
           </option>
@@ -475,8 +465,6 @@ const RichTextEditor = ({
     immediatelyRender: false,
     extensions: [
       StarterKit.configure({
-        document: false,
-        codeBlock: false,
         bulletList: {
           HTMLAttributes: {
             class: 'list-disc list-outside ml-6',
@@ -508,6 +496,10 @@ const RichTextEditor = ({
             !forceLightMode && 'dark:bg-zinc-800 dark:border-zinc-700'
           ),
         },
+      }).extend({
+        addNodeView() {
+          return ReactNodeViewRenderer(CodeBlockComponent)
+        },
       }),
       Underline,
       TextStyle,
@@ -521,21 +513,18 @@ const RichTextEditor = ({
       Highlight,
       TiptapLink.configure({ openOnClick: false }),
       TiptapImage,
-      PageDocument,
-      PageNode,
-      PageManager,
       TabKey,
     ],
-    content: ensurePageWrapper(content),
+    content: content,
     editable: !readOnly,
     editorProps: {
       attributes: {
         class: cn(
-          'prose focus:outline-none w-full mx-auto',
+          'prose prose-sm md:prose-base lg:prose-lg focus:outline-none w-full max-w-none',
           !forceLightMode && 'dark:prose-invert'
         ),
         style:
-          'line-height: 1.6; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;',
+          'line-height: 1.6; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap; min-height: 100%; outline: none;',
       },
     },
     onUpdate: ({ editor }) => {
@@ -566,11 +555,10 @@ const RichTextEditor = ({
   // Handle Remote Updates
   React.useEffect(() => {
     if (remoteContent && editor) {
-      const wrappedContent = ensurePageWrapper(remoteContent)
       const currentHTML = editor.getHTML()
-      if (currentHTML !== wrappedContent) {
+      if (currentHTML !== remoteContent) {
         isRemoteUpdate.current = true
-        editor.commands.setContent(wrappedContent)
+        editor.commands.setContent(remoteContent)
         isRemoteUpdate.current = false
       }
     }
@@ -586,16 +574,19 @@ const RichTextEditor = ({
   return (
     <div
       className={cn(
-        'flex flex-col h-full bg-zinc-100',
+        'flex flex-col h-full bg-white',
         !forceLightMode && 'dark:bg-[#050505]'
       )}
     >
       {!readOnly && <Toolbar editor={editor} forceLightMode={forceLightMode} />}
       <div
-        className='flex-1 overflow-y-auto p-4 lg:p-8 flex justify-center'
+        className='flex-1 overflow-y-auto'
         onClick={() => editor?.commands.focus()}
       >
-        <div ref={containerRef} className='w-full max-w-[816px] cursor-text'>
+        <div
+          ref={containerRef}
+          className='w-full min-h-full px-6 py-8 md:px-16 md:py-12 lg:px-24 lg:py-16 cursor-text'
+        >
           <EditorContent editor={editor} />
         </div>
       </div>
