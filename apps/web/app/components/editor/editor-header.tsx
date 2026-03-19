@@ -55,7 +55,7 @@ const EditorHeader = ({
 
       {/* Center Zone: Primary Actions */}
       <div className='absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:flex items-center gap-2'>
-        {/* Upload Button */}
+        {/* Upload Button
         {documentType !== 'text' && (
           <EditorActionBtn
             onClick={() => onOpenUploadModal(true)}
@@ -66,7 +66,7 @@ const EditorHeader = ({
             }
             icon={<UploadCloud size={14} />}
           />
-        )}
+        )} */}
 
         {/* New JSON */}
         <EditorActionBtn
