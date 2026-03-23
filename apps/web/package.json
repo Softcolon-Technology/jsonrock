@@ -12,6 +12,7 @@
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "@tiptap/core": "^3.19.0",
+    "@tiptap/extension-bubble-menu": "^3.20.4",
     "@tiptap/extension-character-count": "^3.19.0",
     "@tiptap/extension-code-block": "^3.19.0",
     "@tiptap/extension-color": "^3.19.0",
@@ -27,6 +28,7 @@
     "@tiptap/react": "^3.19.0",
     "@tiptap/starter-kit": "^3.19.0",
     "@types/js-cookie": "^3.0.6",
+    "@uiw/react-color": "^2.9.6",
     "clsx": "^2.1.1",
     "elkjs": "^0.11.0",
     "framer-motion": "^12.31.0",
