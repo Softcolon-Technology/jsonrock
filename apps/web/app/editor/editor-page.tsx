@@ -1258,6 +1258,8 @@ export default function Home({
                   readOnly={!hasEditPermission}
                   remoteContent={syncedRemoteContent?.code}
                   forceLightMode={true}
+                  isCurrentUserOwner={isCurrentUserOwner}
+                  slug={documentSlug}
                 />
               </div>
             ) : documentType === 'markdown' ? (
