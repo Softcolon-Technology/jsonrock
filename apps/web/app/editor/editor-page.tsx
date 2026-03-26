@@ -27,6 +27,7 @@ import { ModalAlert } from '../components/ui/ModalAlert'
 import { Toast } from '../components/ui/Toast'
 import { SharePopover } from '../components/SharePopover'
 import Cookies from 'js-cookie'
+import { JsonRockLoader } from '../components/Loader'
 
 import JsonEditor from '../components/JsonEditor'
 import GraphView from '../components/GraphView'
@@ -1208,10 +1209,9 @@ export default function Home({
           'dark:bg-zinc-950 dark:text-zinc-300 relative'
       )}
     >
-      {/* Global Loading Overlay */}
       {isPageLoading && !isPasswordLocked && (
         <div className='absolute inset-0 z-[100] flex items-center justify-center pointer-events-none'>
-          <Loader2 className='w-10 h-10 animate-spin text-emerald-600' />
+          <JsonRockLoader className='w-14 h-14' />
         </div>
       )}
 

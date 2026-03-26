@@ -1,6 +1,9 @@
 import { cn } from '@/lib/utils'
 import { ShareType } from '@/app/iterface'
 import Link from 'next/link'
+import { useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { PortalFullScreenLoader } from '../Loader'
 
 interface Props {
   documentType: ShareType
@@ -23,6 +26,9 @@ const EditorActionBtn = ({
   shortcut,
   isActive,
 }: Props) => {
+  const [isPending, startTransition] = useTransition()
+  const router = useRouter()
+
   const className = cn(
     'flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium border transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:outline-none',
     isActive
@@ -43,14 +49,23 @@ const EditorActionBtn = ({
 
   if (href) {
     return (
-      <Link
-        href={href}
-        className={className}
-        title={shortcut ? `${title} (${shortcut})` : title}
-        aria-label={label}
-      >
-        {content}
-      </Link>
+      <>
+        {isPending && <PortalFullScreenLoader />}
+        <Link
+          href={href}
+          onClick={(e) => {
+            e.preventDefault()
+            startTransition(() => {
+              router.push(href)
+            })
+          }}
+          className={className}
+          title={shortcut ? `${title} (${shortcut})` : title}
+          aria-label={label}
+        >
+          {content}
+        </Link>
+      </>
     )
   }
 
