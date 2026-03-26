@@ -58,6 +58,7 @@ import {
   Type,
   X,
   MessageSquare,
+  Download,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -69,6 +70,40 @@ declare module '@tiptap/core' {
       unsetFontSize: () => ReturnType
     }
   }
+}
+
+const handleTextDownload = async (
+  content: string,
+  requestedFilename: string
+) => {
+  try {
+    if ('showSaveFilePicker' in window) {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: requestedFilename,
+        types: [
+          {
+            description: 'Text File',
+            accept: { 'text/plain': ['.txt'] },
+          },
+        ],
+      })
+      const writable = await handle.createWritable()
+      await writable.write(content)
+      await writable.close()
+      return
+    }
+  } catch (err: any) {
+    if (err.name !== 'AbortError') console.error(err)
+    return
+  }
+  // Fallback
+  const blob = new Blob([content], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = requestedFilename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 const FontSize = Extension.create({
@@ -973,8 +1008,25 @@ const Toolbar = ({
       </ToolbarButton>
 
       <div className='flex-1' />
-      <div className='pr-1 flex items-center'>
+      <div className='pr-1 flex items-center gap-1'>
         <ToolbarDivider forceLightMode={forceLightMode} />
+        <ToolbarButton
+          onClick={() => {
+            if (editor && slug) {
+              const text = editor.getText()
+              handleTextDownload(text, 'document.txt')
+            }
+          }}
+          title={
+            !slug
+              ? 'Save or create document first to download'
+              : 'Download Text'
+          }
+          forceLightMode={forceLightMode}
+          disabled={!slug}
+        >
+          <Download className='w-4 h-4' />
+        </ToolbarButton>
         <ToolbarButton
           onClick={onToggleFullScreen}
           title={isFullScreen ? 'Exit Full Screen' : 'Full Screen'}

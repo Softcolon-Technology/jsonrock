@@ -1269,6 +1269,7 @@ export default function Home({
                   onChange={onJsonContentChange}
                   readOnly={!hasEditPermission}
                   onFileDrop={processSelectedFile}
+                  slug={documentSlug}
                 />
               </div>
             ) : (
@@ -1283,6 +1284,7 @@ export default function Home({
                     onValidate={handleEditorValidation}
                     readOnly={!hasEditPermission}
                     onFileDrop={processSelectedFile}
+                    slug={documentSlug}
                     options={{
                       padding: { top: 16, bottom: 100 }, // Ensure last lines are visible above floating alert
                     }}
