@@ -519,10 +519,32 @@ const Toolbar = ({
   const [isCommentInputOpen, setIsCommentInputOpen] = React.useState(false)
   const [commentDraft, setCommentDraft] = React.useState('')
 
+  const [localTextColor, setLocalTextColor] = React.useState(
+    editor?.getAttributes('textStyle').color || '#000000'
+  )
+  const [localHighlightColor, setLocalHighlightColor] = React.useState(
+    editor?.getAttributes('highlight').color || '#fef08a'
+  )
+
+  React.useEffect(() => {
+    if (!editor) return
+    const updateColors = () => {
+      setLocalTextColor(editor.getAttributes('textStyle').color || '#000000')
+      setLocalHighlightColor(
+        editor.getAttributes('highlight').color || '#fef08a'
+      )
+    }
+    editor.on('selectionUpdate', updateColors)
+    return () => {
+      editor.off('selectionUpdate', updateColors)
+    }
+  }, [editor])
+
   const textColorRef = React.useRef<HTMLDivElement>(null)
   const highlightColorRef = React.useRef<HTMLDivElement>(null)
   const commentRef = React.useRef<HTMLDivElement>(null)
 
+  // Handle outside clicks to close dropdowns
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -702,13 +724,37 @@ const Toolbar = ({
                 </button>
               </div>
               <Sketch
-                color={editor.getAttributes('textStyle').color || '#000000'}
+                color={localTextColor}
                 onChange={(color) => {
-                  editor.chain().focus().setColor(color.hex).run()
+                  setLocalTextColor(color.hex)
                 }}
                 className='bg-transparent! border-none! shadow-none!'
                 disableAlpha={true}
               />
+              <div className='flex items-center gap-2 mt-2 pt-3 border-t border-zinc-100 dark:border-zinc-700/50 justify-center'>
+                <button
+                  onClick={() => {
+                    setLocalTextColor(
+                      editor.getAttributes('textStyle').color || '#000000'
+                    )
+                    setIsTextColorOpen(false)
+                  }}
+                  className='flex-1 py-1.5 px-3 text-sm font-semibold text-blue-500 bg-white border border-zinc-200 hover:bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 dark:hover:bg-zinc-700 rounded transition-colors'
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (editor) {
+                      editor.chain().focus().setColor(localTextColor).run()
+                    }
+                    setIsTextColorOpen(false)
+                  }}
+                  className='flex-1 py-1.5 px-3 text-sm font-semibold bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors shadow-sm'
+                >
+                  OK
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -746,17 +792,41 @@ const Toolbar = ({
                 </button>
               </div>
               <Sketch
-                color={editor.getAttributes('highlight').color || '#fef08a'}
+                color={localHighlightColor}
                 onChange={(color) => {
-                  editor
-                    .chain()
-                    .focus()
-                    .setHighlight({ color: color.hex })
-                    .run()
+                  setLocalHighlightColor(color.hex)
                 }}
                 className='bg-transparent! border-none! shadow-none!'
                 disableAlpha={true}
               />
+              <div className='flex items-center gap-2 mt-2 pt-3 border-t border-zinc-100 dark:border-zinc-700/50 justify-center'>
+                <button
+                  onClick={() => {
+                    setLocalHighlightColor(
+                      editor.getAttributes('highlight').color || '#fef08a'
+                    )
+                    setIsHighlightColorOpen(false)
+                  }}
+                  className='flex-1 py-1.5 px-3 text-sm font-semibold text-blue-500 bg-white border border-zinc-200 hover:bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 dark:hover:bg-zinc-700 rounded transition-colors'
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (editor) {
+                      editor
+                        .chain()
+                        .focus()
+                        .setHighlight({ color: localHighlightColor })
+                        .run()
+                    }
+                    setIsHighlightColorOpen(false)
+                  }}
+                  className='flex-1 py-1.5 px-3 text-sm font-semibold bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors shadow-sm'
+                >
+                  OK
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1259,9 +1329,15 @@ const RichTextEditor = ({
       <div
         className='flex-1 overflow-y-auto relative'
         ref={scrollContainerRef}
-        onClick={() => {
+        onClick={(e) => {
           setActiveCommentPopup(null)
-          editor?.commands.focus()
+          // Only forcefully regain focus if clicking the empty margin/padding
+          if (
+            e.target === e.currentTarget ||
+            (containerRef.current && e.target === containerRef.current)
+          ) {
+            editor?.commands.focus()
+          }
         }}
         onScroll={() => setActiveCommentPopup(null)}
       >

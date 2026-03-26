@@ -14,6 +14,9 @@ import SaveStatus from './header/save-status'
 import EditorActionBtn from '../button/editor-action-btn'
 import Link from 'next/link'
 import { FaGithub } from 'react-icons/fa6'
+import { useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { PortalFullScreenLoader } from '../Loader'
 
 interface Props {
   documentType: ShareType
@@ -36,6 +39,9 @@ const EditorHeader = ({
   onOpenShareModal,
   currentViewMode,
 }: Props) => {
+  const [isPending, startTransition] = useTransition()
+  const router = useRouter()
+
   return (
     <header
       className={cn(
@@ -174,8 +180,15 @@ const EditorHeader = ({
         </Link>
 
         {/* Home */}
+        {isPending && <PortalFullScreenLoader />}
         <Link
           href='/'
+          onClick={(e) => {
+            e.preventDefault()
+            startTransition(() => {
+              router.push('/')
+            })
+          }}
           className={cn(
             'p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all flex items-center justify-center focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:outline-none',
             documentType !== 'text' &&

@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 import EditorPage from '../../editor-page'
+import { FullScreenLoader } from '../../../components/Loader'
 
 interface Props {
   params: Promise<{ slug: string }>
@@ -47,7 +48,7 @@ export default async function EditorTextSlugPage({ params }: Props) {
   }
 
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<FullScreenLoader />}>
       <EditorPage initialRecord={initialRecord} featureMode='text' />
     </Suspense>
   )
