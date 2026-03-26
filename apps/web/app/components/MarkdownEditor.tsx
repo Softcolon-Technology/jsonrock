@@ -6,13 +6,87 @@ import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
-import { UploadCloud } from 'lucide-react'
+import { UploadCloud, Download } from 'lucide-react'
+
+const handleMarkdownDownload = async (
+  content: string,
+  requestedFilename: string
+) => {
+  try {
+    if ('showSaveFilePicker' in window) {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: requestedFilename,
+        types: [
+          {
+            description: 'Markdown File',
+            accept: { 'text/markdown': ['.md'] },
+          },
+        ],
+      })
+      const writable = await handle.createWritable()
+      await writable.write(content)
+      await writable.close()
+      return
+    }
+  } catch (err: any) {
+    if (err.name !== 'AbortError') console.error(err)
+    return
+  }
+  const blob = new Blob([content], { type: 'text/markdown' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = requestedFilename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+const handleDocDownload = async (
+  htmlContent: string,
+  requestedFilename: string
+) => {
+  const header =
+    "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export Document</title></head><body>"
+  const footer = '</body></html>'
+  const sourceHTML = header + htmlContent + footer
+
+  try {
+    if ('showSaveFilePicker' in window) {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: requestedFilename,
+        types: [
+          {
+            description: 'Word Document',
+            accept: { 'application/msword': ['.doc'] },
+          },
+        ],
+      })
+      const writable = await handle.createWritable()
+      await writable.write(sourceHTML)
+      await writable.close()
+      return
+    }
+  } catch (err: any) {
+    if (err.name !== 'AbortError') console.error(err)
+    return
+  }
+  const blob = new Blob([sourceHTML], {
+    type: 'application/msword;charset=utf-8',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = requestedFilename
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 interface MarkdownEditorProps {
   content: string
   onChange: (value: string) => void
   readOnly?: boolean
   onFileDrop?: (file: File) => Promise<void>
+  slug?: string | null
 }
 
 // Custom components for every markdown element — fully styled for dark/light mode
@@ -163,6 +237,7 @@ export default function MarkdownEditor({
   onChange,
   readOnly = false,
   onFileDrop,
+  slug,
 }: MarkdownEditorProps) {
   const [leftWidth, setLeftWidth] = useState(50)
   const [isDragging, setIsDragging] = useState(false)
@@ -294,6 +369,26 @@ export default function MarkdownEditor({
           <span className='text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider'>
             Markdown
           </span>
+          <div className='flex-1' />
+          <button
+            onClick={() => {
+              if (slug) handleMarkdownDownload(content, 'document.md')
+            }}
+            disabled={!slug}
+            title={
+              !slug
+                ? 'Save or create document first to download'
+                : 'Download Markdown (.md)'
+            }
+            className={cn(
+              'flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-colors',
+              !slug
+                ? 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
+                : 'text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50'
+            )}
+          >
+            <Download size={14} />
+          </button>
         </div>
         <textarea
           ref={textareaRef}
@@ -321,6 +416,28 @@ export default function MarkdownEditor({
           <span className='text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider'>
             Preview
           </span>
+          <div className='flex-1' />
+          <button
+            onClick={() => {
+              if (slug && previewRef.current) {
+                handleDocDownload(previewRef.current.innerHTML, 'document.doc')
+              }
+            }}
+            disabled={!slug}
+            title={
+              !slug
+                ? 'Save or create document first to download'
+                : 'Download as Word Document (.doc)'
+            }
+            className={cn(
+              'flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-colors',
+              !slug
+                ? 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
+                : 'text-zinc-600 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50'
+            )}
+          >
+            <Download size={14} />
+          </button>
         </div>
         <div
           ref={previewRef}

@@ -13,11 +13,46 @@ interface JsonEditorProps {
   options?: editor.IStandaloneEditorConstructionOptions
   language?: string
   onFileDrop?: (file: File) => Promise<void>
+  slug?: string | null
 }
 
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
-import { UploadCloud } from 'lucide-react'
+import { UploadCloud, Download } from 'lucide-react'
+
+const handleJsonDownload = async (
+  content: string,
+  requestedFilename: string
+) => {
+  try {
+    if ('showSaveFilePicker' in window) {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: requestedFilename,
+        types: [
+          {
+            description: 'JSON File',
+            accept: { 'application/json': ['.json'] },
+          },
+        ],
+      })
+      const writable = await handle.createWritable()
+      await writable.write(content)
+      await writable.close()
+      return
+    }
+  } catch (err: any) {
+    if (err.name !== 'AbortError') console.error(err)
+    return
+  }
+  // Fallback
+  const blob = new Blob([content], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = requestedFilename
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 const JsonEditor: React.FC<JsonEditorProps> = ({
   defaultValue,
@@ -30,6 +65,7 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
   options: customOptions,
   language = 'json',
   onFileDrop,
+  slug,
 }) => {
   const { theme } = useTheme()
   const [isDragOver, setIsDragOver] = React.useState(false)
@@ -157,6 +193,27 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
           </p>
         </div>
       )}
+
+      <button
+        onClick={() => {
+          if (editorRef.current && slug) {
+            handleJsonDownload(editorRef.current.getValue(), 'document.json')
+          }
+        }}
+        disabled={!slug}
+        title={
+          !slug ? 'Save or create document first to download' : 'Download JSON'
+        }
+        className={cn(
+          'absolute top-1 right-2.5 z-10 p-1 backdrop-blur-md border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-sm transition-colors',
+          !slug
+            ? 'bg-white/50 dark:bg-zinc-900/50 text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
+            : 'bg-white/90 dark:bg-zinc-900/90 hover:bg-white dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-500 hover:shadow cursor-pointer'
+        )}
+      >
+        <Download size={14} />
+      </button>
+
       <Editor
         height='100%'
         defaultLanguage='json'
