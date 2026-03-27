@@ -98,7 +98,7 @@ export default function Home({
     initialRecord
       ? initialRecord.json
       : effectiveFeatureMode === 'text'
-        ? '<p style="font-size: 14pt">Type your text here...</p>'
+        ? ''
         : effectiveFeatureMode === 'markdown'
           ? '# Hello Markdown\n\nStart typing...'
           : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
@@ -323,7 +323,7 @@ export default function Home({
       isInitialMountRef.current = false
       const defaultContent =
         featureMode === 'text'
-          ? '<p style="font-size: 14pt">Type your text here...</p>'
+          ? ''
           : featureMode === 'markdown'
             ? '# Hello Markdown\n\nStart typing...'
             : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
@@ -335,7 +335,7 @@ export default function Home({
       setUserAccessLevel('viewer')
       setDocumentType(featureMode)
       if (featureMode !== 'text' && featureMode !== 'markdown') {
-        setCurrentViewMode('visualize')
+        setCurrentViewMode(paramView || 'visualize')
       }
       setIsCurrentUserOwner(true)
       setHasEditPermission(true)
