@@ -320,3 +320,18 @@ pre[class*="bg-zinc"]::-webkit-scrollbar-corner {
 .react-flow__edge-interaction {
   stroke-width: 20 !important;
 }
+
+/* Tiptap Placeholder Extension Support */
+.tiptap .is-editor-empty:first-child::before,
+.tiptap .is-empty::before {
+  color: #9ca3af !important;
+  content: "Type your text here..." !important;
+  float: left !important;
+  height: 0 !important;
+  pointer-events: none !important;
+}
+
+.dark .tiptap .is-editor-empty:first-child::before,
+.dark .tiptap .is-empty::before {
+  color: #52525b !important; /* zinc-600 */
+}

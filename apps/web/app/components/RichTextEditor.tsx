@@ -13,6 +13,7 @@ import { FontFamily } from '@tiptap/extension-font-family'
 import { Highlight } from '@tiptap/extension-highlight'
 import { Link as TiptapLink } from '@tiptap/extension-link'
 import { Image as TiptapImage } from '@tiptap/extension-image'
+import Placeholder from '@tiptap/extension-placeholder'
 import CodeBlock from '@tiptap/extension-code-block'
 import { Extension, Mark, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer } from '@tiptap/react'
@@ -1192,6 +1193,11 @@ const RichTextEditor = ({
           },
         },
       }),
+      Placeholder.configure({
+        placeholder: 'Type your text here...',
+        emptyEditorClass: 'is-editor-empty',
+        emptyNodeClass: 'is-empty',
+      }),
       CodeBlock.configure({
         HTMLAttributes: {
           class: cn(
@@ -1226,7 +1232,7 @@ const RichTextEditor = ({
     editorProps: {
       attributes: {
         class: cn(
-          'prose prose-sm md:prose-base lg:prose-lg focus:outline-none w-full max-w-none',
+          'tiptap prose prose-sm md:prose-base lg:prose-lg focus:outline-none w-full max-w-none',
           !forceLightMode && 'dark:prose-invert'
         ),
         style:
