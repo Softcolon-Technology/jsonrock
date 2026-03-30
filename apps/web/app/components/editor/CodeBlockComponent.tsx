@@ -48,8 +48,8 @@ export const CodeBlockComponent = ({
 
       <pre
         className={cn(
-          'page-code-block not-prose bg-zinc-100 p-4 pt-12 rounded-md border border-zinc-200 font-mono text-sm shadow-sm block overflow-x-auto min-h-[3rem]',
-          'dark:bg-zinc-900 dark:border-zinc-800'
+          'page-code-block not-prose bg-zinc-100 text-zinc-800 p-4 pt-12 rounded-md border border-zinc-200 font-mono text-sm shadow-sm block overflow-x-auto min-h-[3rem]',
+          'dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-200'
         )}
       >
         <code className='min-h-12'>

@@ -1201,8 +1201,9 @@ const RichTextEditor = ({
       CodeBlock.configure({
         HTMLAttributes: {
           class: cn(
-            'page-code-block not-prose bg-zinc-100 p-3 rounded-md border border-zinc-200 font-mono text-sm shadow-sm my-2 block',
-            !forceLightMode && 'dark:bg-zinc-800 dark:border-zinc-700'
+            'page-code-block not-prose bg-zinc-100 text-zinc-800 p-3 rounded-md border border-zinc-200 font-mono text-sm shadow-sm my-2 block',
+            !forceLightMode &&
+              'dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200'
           ),
         },
       }).extend({
