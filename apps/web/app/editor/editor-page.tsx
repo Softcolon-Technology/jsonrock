@@ -1082,7 +1082,8 @@ export default function Home({
         documentType === 'markdown') &&
       documentSlug &&
       hasEditPermission &&
-      !isPasswordLocked
+      !isPasswordLocked &&
+      (documentType !== 'json' || isJsonValid)
     ) {
       // Check if content actually changed from last save
       if (debouncedContentForAutoSave === lastPersistedContentRef.current)
@@ -1091,7 +1092,14 @@ export default function Home({
       // Prevent double calls or saving while already saving (though guard handles it)
       handleSaveDocument(true)
     }
-  }, [debouncedContentForAutoSave])
+  }, [
+    debouncedContentForAutoSave,
+    documentType,
+    documentSlug,
+    hasEditPermission,
+    isPasswordLocked,
+    isJsonValid,
+  ])
 
   // Auto-Create Effect: When no slug exists and user edits default content, auto-create a document
   const isAutoCreatingRef = React.useRef(false)
@@ -1101,7 +1109,8 @@ export default function Home({
       !documentSlug &&
       debouncedContentForAutoSave !== lastPersistedContentRef.current &&
       debouncedContentForAutoSave.trim() &&
-      !isAutoCreatingRef.current
+      !isAutoCreatingRef.current &&
+      (documentType !== 'json' || isJsonValid)
     ) {
       isAutoCreatingRef.current = true
       const targetType = documentType
@@ -1140,10 +1149,14 @@ export default function Home({
                 : `?view=${currentViewMode}`
             const newUrl = `${route}${data.slug}${viewParam}`
 
-            // Use Next.js router.replace for silent background URL update instead of raw history API.
-            // This ensures Next.js knows the route changed, so clicking "New JSON" later correctly navigates back.
+            // Use window.history.replaceState instead of router.replace
+            // router.replace causes a Next.js server-side navigation which may 404 because the DB isn't updated instantly causing a redirect to /editor
             justAutoSavedSlugRef.current = data.slug
-            router.replace(newUrl, { scroll: false })
+            window.history.replaceState(
+              { ...window.history.state, as: newUrl, url: newUrl },
+              '',
+              newUrl
+            )
           }
         })
         .catch((e) => console.error('Auto-create failed', e))
@@ -1151,7 +1164,7 @@ export default function Home({
           isAutoCreatingRef.current = false
         })
     }
-  }, [debouncedContentForAutoSave])
+  }, [debouncedContentForAutoSave, documentSlug, documentType, isJsonValid])
 
   const handleCopy = () => {
     // Copy the formatted output, not the input, if we are in format tab
