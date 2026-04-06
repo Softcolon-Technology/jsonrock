@@ -17,7 +17,8 @@ const getStringValue = (value: any, type: string): string => {
   if (type === 'object' || type === 'array') return '...'
   if (type === 'null') return 'null'
   if (type === 'undefined') return 'undefined'
-  return String(value)
+  const str = String(value)
+  return str.length > 48 ? str.substring(0, 48) + '...' : str
 }
 
 export default function PropertyTable({ data, name }: PropertyTableProps) {
@@ -101,9 +102,24 @@ export default function PropertyTable({ data, name }: PropertyTableProps) {
               const valType = getType(value)
               const displayVal = getStringValue(value, valType)
               const isRowComplex = valType === 'object' || valType === 'array'
+              const stringifiedValue = String(value)
+              const isTruncatedPrimitive =
+                !isRowComplex && stringifiedValue.length > 48
+
               const fullValue = isRowComplex
                 ? JSON.stringify(value, null, 2)
-                : displayVal
+                : stringifiedValue
+
+              const tooltipValue = isRowComplex
+                ? JSON.stringify(
+                    value,
+                    (k, v) =>
+                      typeof v === 'string' && v.length > 48
+                        ? v.substring(0, 48) + '...'
+                        : v,
+                    2
+                  )
+                : stringifiedValue
 
               return (
                 <tr
@@ -116,9 +132,13 @@ export default function PropertyTable({ data, name }: PropertyTableProps) {
                   <td
                     className='w-2/3 border-b border-zinc-200 dark:border-zinc-800 px-2 py-1 align-top text-zinc-600 dark:text-zinc-400 font-mono truncate max-w-[200px]'
                     onMouseEnter={() =>
-                      isRowComplex && handleMouseEnter(fullValue)
+                      (isRowComplex || isTruncatedPrimitive) &&
+                      handleMouseEnter(tooltipValue)
                     }
-                    onMouseMove={(e) => isRowComplex && handleMouseMove(e)}
+                    onMouseMove={(e) =>
+                      (isRowComplex || isTruncatedPrimitive) &&
+                      handleMouseMove(e)
+                    }
                     onMouseLeave={handleMouseLeave}
                   >
                     <div className='flex items-center justify-between'>
@@ -127,11 +147,7 @@ export default function PropertyTable({ data, name }: PropertyTableProps) {
                       >
                         {displayVal}
                       </span>
-                      <ValueCopyButton
-                        value={
-                          isRowComplex ? JSON.stringify(value) : String(value)
-                        }
-                      />
+                      <ValueCopyButton value={fullValue} />
                     </div>
                   </td>
                 </tr>
@@ -150,28 +166,38 @@ export default function PropertyTable({ data, name }: PropertyTableProps) {
           </tbody>
         </table>
       </div>
-      {tooltip && (
-        <div
-          className='fixed z-[9999] max-w-sm whitespace-pre-wrap break-words bg-white dark:bg-zinc-950 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800 px-3 py-2 rounded-lg shadow-xl text-xs font-mono pointer-events-none'
-          style={{
-            left: tooltip.x,
-            top: tooltip.y,
-            transform: `translate(${tooltip.x > (typeof window !== 'undefined' ? window.innerWidth : 0) * 0.6 ? '-100%' : '0'}, ${tooltip.y > (typeof window !== 'undefined' ? window.innerHeight : 0) * 0.6 ? '-100%' : '0'})`,
-            marginLeft:
-              tooltip.x >
-              (typeof window !== 'undefined' ? window.innerWidth : 0) * 0.6
-                ? -12
-                : 12,
-            marginTop:
-              tooltip.y >
-              (typeof window !== 'undefined' ? window.innerHeight : 0) * 0.6
-                ? -12
-                : 12,
-          }}
-        >
-          {tooltip.content}
-        </div>
-      )}
+      {tooltip &&
+        (() => {
+          const isRightHalf =
+            typeof window !== 'undefined'
+              ? tooltip.x > window.innerWidth * 0.5
+              : false
+          const isBottomHalf =
+            typeof window !== 'undefined'
+              ? tooltip.y > window.innerHeight * 0.5
+              : false
+          return (
+            <div
+              className='fixed z-9999 w-max max-w-2xl max-h-[90vh] overflow-hidden whitespace-pre-wrap break-all bg-white dark:bg-zinc-950 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800 px-3 py-2 rounded-lg shadow-xl text-xs font-mono pointer-events-none'
+              style={{
+                left: !isRightHalf ? tooltip.x + 12 : undefined,
+                right: isRightHalf
+                  ? (typeof window !== 'undefined' ? window.innerWidth : 0) -
+                    tooltip.x +
+                    12
+                  : undefined,
+                top: !isBottomHalf ? tooltip.y + 12 : undefined,
+                bottom: isBottomHalf
+                  ? (typeof window !== 'undefined' ? window.innerHeight : 0) -
+                    tooltip.y +
+                    12
+                  : undefined,
+              }}
+            >
+              {tooltip.content}
+            </div>
+          )
+        })()}
     </div>
   )
 }
