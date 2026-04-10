@@ -163,7 +163,23 @@ body {
   /* Optional: hide the minimap ruler if distracting */
 }
 
+/* === Monaco Editor Find Widget Positioning === */
+/* Lower the find widget slightly so tooltips aren't cropped by the container 
+   and to avoid covering the top-right download button */
+.monaco-editor .find-widget.visible {
+  top: 20px !important;
+  right: 40px !important;
+  /* Prevent horizontal overflow on small mobile screens */
+  max-width: calc(100% - 60px) !important;
+}
 
+/* Align the 'X' close button visually with the other buttons */
+.monaco-editor .find-widget .close-fw::before {
+  /* Monaco draws icons using a ::before pseudo-element. 
+     Nudging the icon itself is much more reliable than moving the flex container */
+  position: relative;
+  top: 1px !important;
+}
 
 /* Code blocks with scrollable content - use !important to override Tailwind */
 .page-code-block,

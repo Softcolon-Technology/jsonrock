@@ -104,7 +104,7 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
     monacoRef.current = monaco
 
     // Define Dark Theme
-    monaco.editor.defineTheme('cracker-dark', {
+    monaco.editor.defineTheme('rock-dark', {
       base: 'vs-dark',
       inherit: true,
       rules: [],
@@ -115,7 +115,7 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
     })
 
     // Define Light Theme
-    monaco.editor.defineTheme('cracker-light', {
+    monaco.editor.defineTheme('rock-light', {
       base: 'vs',
       inherit: true,
       rules: [],
@@ -126,7 +126,7 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
     })
 
     // Initial Set
-    const currentTheme = theme === 'dark' ? 'cracker-dark' : 'cracker-light'
+    const currentTheme = theme === 'dark' ? 'rock-dark' : 'rock-light'
     monaco.editor.setTheme(currentTheme)
 
     // Notify parent that editor is fully ready
@@ -136,7 +136,7 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
   // React to theme changes
   React.useEffect(() => {
     if (monacoRef.current) {
-      const currentTheme = theme === 'dark' ? 'cracker-dark' : 'cracker-light'
+      const currentTheme = theme === 'dark' ? 'rock-dark' : 'rock-light'
       monacoRef.current.editor.setTheme(currentTheme)
     }
   }, [theme])
@@ -194,25 +194,29 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
         </div>
       )}
 
-      <button
-        onClick={() => {
-          if (editorRef.current && slug) {
-            handleJsonDownload(editorRef.current.getValue(), 'document.json')
+      {!readOnly && (
+        <button
+          onClick={() => {
+            if (editorRef.current && slug) {
+              handleJsonDownload(editorRef.current.getValue(), 'document.json')
+            }
+          }}
+          disabled={!slug}
+          title={
+            !slug
+              ? 'Save or create document first to download'
+              : 'Download JSON'
           }
-        }}
-        disabled={!slug}
-        title={
-          !slug ? 'Save or create document first to download' : 'Download JSON'
-        }
-        className={cn(
-          'absolute top-1 right-2.5 z-10 p-1 backdrop-blur-md border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-sm transition-colors',
-          !slug
-            ? 'bg-white/50 dark:bg-zinc-900/50 text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
-            : 'bg-white/90 dark:bg-zinc-900/90 hover:bg-white dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-500 hover:shadow cursor-pointer'
-        )}
-      >
-        <Download size={14} />
-      </button>
+          className={cn(
+            'absolute top-1 right-2.5 z-10 p-1 backdrop-blur-md border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-sm transition-colors',
+            !slug
+              ? 'bg-white/50 dark:bg-zinc-900/50 text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
+              : 'bg-white/90 dark:bg-zinc-900/90 hover:bg-white dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-500 hover:shadow cursor-pointer'
+          )}
+        >
+          <Download size={14} />
+        </button>
+      )}
 
       <Editor
         height='100%'

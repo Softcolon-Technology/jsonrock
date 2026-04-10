@@ -126,9 +126,10 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
       {children}
     </p>
   ),
-  a: ({ href, children }) => (
+  a: ({ href, children, title }) => (
     <a
       href={href}
+      title={title}
       target='_blank'
       rel='noopener noreferrer'
       className='text-emerald-600 dark:text-emerald-400 underline underline-offset-2 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors'
@@ -165,22 +166,20 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
       {children}
     </blockquote>
   ),
-  code: ({ inline, className, children, ...props }: any) => {
-    if (inline) {
-      return (
-        <code className='px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800/50 text-emerald-600 dark:text-emerald-400 font-mono text-[0.875em] border border-zinc-200 dark:border-zinc-700/50'>
-          {children}
-        </code>
-      )
-    }
+  code: ({ className, children, node, ...props }: any) => {
     return (
-      <code className='block font-mono text-sm text-zinc-800 dark:text-zinc-200'>
+      <code
+        className={cn(
+          'px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800/50 text-emerald-600 dark:text-emerald-400 font-mono text-[0.875em] border border-zinc-200 dark:border-zinc-700/50',
+          className
+        )}
+      >
         {children}
       </code>
     )
   },
   pre: ({ children }) => (
-    <pre className='bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 my-4 overflow-x-auto text-zinc-800 dark:text-zinc-200 text-sm font-mono leading-relaxed shadow-sm'>
+    <pre className='bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 my-4 overflow-x-auto text-zinc-800 dark:text-zinc-200 text-sm font-mono leading-relaxed shadow-sm [&>code]:!bg-transparent [&>code]:!border-none [&>code]:!p-0 [&>code]:!text-inherit [&>code]:!block'>
       {children}
     </pre>
   ),
@@ -213,11 +212,12 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
     </th>
   ),
   td: ({ children }) => <td className='px-4 py-3'>{children}</td>,
-  img: ({ src, alt }) => (
+  img: ({ src, alt, title }) => (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}
       alt={alt}
+      title={title}
       className='max-w-full h-auto rounded-lg my-4 shadow-md border border-zinc-200 dark:border-zinc-700'
     />
   ),
