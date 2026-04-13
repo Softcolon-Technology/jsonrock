@@ -110,7 +110,7 @@ export default function Home({
         ? ''
         : effectiveFeatureMode === 'markdown'
           ? '# Hello Markdown\n\nStart typing...'
-          : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+          : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
   )
 
   const lastPersistedContentRef = React.useRef<string>(
@@ -196,7 +196,7 @@ export default function Home({
 
   // Helper to determine ownership (moved before canEdit initialization)
   const checkOwnership = useCallback((targetSlug: string) => {
-    const ownedSlugs = Cookies.get('json-cracker-owned')
+    const ownedSlugs = Cookies.get('json-rock-owned')
     if (ownedSlugs) {
       try {
         const parsed = JSON.parse(ownedSlugs)
@@ -390,7 +390,7 @@ export default function Home({
           ? ''
           : featureMode === 'markdown'
             ? '# Hello Markdown\n\nStart typing...'
-            : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+            : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
 
       // Reset the state to an empty un-saved document canvas
       setCurrentJsonContent(defaultContent)
@@ -418,7 +418,7 @@ export default function Home({
   }, [paramView])
 
   const addOwnership = (newSlug: string) => {
-    const owned = Cookies.get('json-cracker-owned')
+    const owned = Cookies.get('json-rock-owned')
     let slugs: string[] = []
     if (owned) {
       try {
@@ -427,7 +427,7 @@ export default function Home({
     }
     if (!slugs.includes(newSlug)) {
       slugs.push(newSlug)
-      Cookies.set('json-cracker-owned', JSON.stringify(slugs), {
+      Cookies.set('json-rock-owned', JSON.stringify(slugs), {
         expires: 30,
         path: '/',
       }) // 30 days
@@ -694,7 +694,7 @@ export default function Home({
       syncFromData(data)
 
       // Check if I am actually the owner (maybe I created it on this device?)
-      const ownedSlugs = Cookies.get('json-cracker-owned')
+      const ownedSlugs = Cookies.get('json-rock-owned')
       if (ownedSlugs) {
         try {
           const parsed = JSON.parse(ownedSlugs)
@@ -728,7 +728,7 @@ export default function Home({
       ? '<p style="font-size: 14pt">Type your text here...</p>'
       : isMarkdown
         ? '# Hello Markdown\n\nStart typing...'
-        : '{\n  "project": "JSON Cracker",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+        : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
 
     setCurrentJsonContent(initialContent)
     setDocumentSlug(null)

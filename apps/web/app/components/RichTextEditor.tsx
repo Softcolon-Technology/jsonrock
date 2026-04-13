@@ -22,7 +22,7 @@ import Cookies from 'js-cookie'
 
 const getCookieComments = (slug: string) => {
   try {
-    const raw = Cookies.get(`json-cracker-comments-${slug}`)
+    const raw = Cookies.get(`json-rock-comments-${slug}`)
     return raw ? JSON.parse(raw) : []
   } catch (err) {
     return []
@@ -33,7 +33,7 @@ const addCookieComment = (slug: string, commentId: string) => {
   const existing = getCookieComments(slug)
   if (!existing.includes(commentId)) {
     const updated = [...existing, commentId]
-    Cookies.set(`json-cracker-comments-${slug}`, JSON.stringify(updated), {
+    Cookies.set(`json-rock-comments-${slug}`, JSON.stringify(updated), {
       expires: 30,
     })
   }
