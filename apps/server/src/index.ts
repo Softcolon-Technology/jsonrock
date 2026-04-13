@@ -110,7 +110,7 @@ io.on('connection', (socket) => {
 })
 
 app.get('/', (req: Request, res: Response) => {
-  res.send('JSON Cracker Backend is running!')
+  res.send('JSON Rock Backend is running!')
 })
 
 // 404 handler
