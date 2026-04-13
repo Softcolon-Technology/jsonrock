@@ -30,7 +30,7 @@ const EditorActionBtn = ({
   const router = useRouter()
 
   const className = cn(
-    'flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium border transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:outline-none',
+    'flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium border transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:outline-none hover:cursor-pointer',
     isActive
       ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm shadow-emerald-900/20'
       : cn(
