@@ -12,6 +12,7 @@ const handleMarkdownDownload = async (
   content: string,
   requestedFilename: string
 ) => {
+  let filePicked = false
   try {
     if ('showSaveFilePicker' in window) {
       const handle = await (window as any).showSaveFilePicker({
@@ -26,12 +27,15 @@ const handleMarkdownDownload = async (
       const writable = await handle.createWritable()
       await writable.write(content)
       await writable.close()
-      return
+      filePicked = true
     }
   } catch (err: any) {
     if (err.name !== 'AbortError') console.error(err)
-    return
+    if (err.name === 'AbortError') return
   }
+
+  if (filePicked) return
+
   const blob = new Blob([content], { type: 'text/markdown' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -50,6 +54,7 @@ const handleDocDownload = async (
   const footer = '</body></html>'
   const sourceHTML = header + htmlContent + footer
 
+  let filePicked = false
   try {
     if ('showSaveFilePicker' in window) {
       const handle = await (window as any).showSaveFilePicker({
@@ -64,12 +69,15 @@ const handleDocDownload = async (
       const writable = await handle.createWritable()
       await writable.write(sourceHTML)
       await writable.close()
-      return
+      filePicked = true
     }
   } catch (err: any) {
     if (err.name !== 'AbortError') console.error(err)
-    return
+    if (err.name === 'AbortError') return
   }
+
+  if (filePicked) return
+
   const blob = new Blob([sourceHTML], {
     type: 'application/msword;charset=utf-8',
   })
@@ -79,6 +87,78 @@ const handleDocDownload = async (
   a.download = requestedFilename
   a.click()
   URL.revokeObjectURL(url)
+}
+
+const handlePdfDownload = async (
+  element: HTMLElement,
+  requestedFilename: string
+) => {
+  try {
+    const iframe = document.createElement('iframe')
+    iframe.style.position = 'fixed'
+    iframe.style.right = '0'
+    iframe.style.bottom = '0'
+    iframe.style.width = '0'
+    iframe.style.height = '0'
+    iframe.style.border = '0'
+    document.body.appendChild(iframe)
+
+    const doc = iframe.contentWindow?.document
+    if (!doc) return
+
+    doc.open()
+
+    // Grab all stylesheets to ensure 100% Tailwind CSS fidelity
+    const styles = Array.from(
+      document.querySelectorAll('style, link[rel="stylesheet"]')
+    )
+      .map((s) => s.outerHTML)
+      .join('\n')
+
+    const isDark = document.documentElement.classList.contains('dark')
+    const bgClass = isDark ? 'bg-[#0a0a0a]' : 'bg-white'
+    const title = requestedFilename.replace(/\.pdf$/, '')
+
+    doc.write(`
+      <html>
+        <head>
+          <title>${title}</title>
+          ${styles}
+          <style>
+            @media print {
+              @page { margin: 0; }
+              body { 
+                margin: 0; 
+                padding: 15mm;
+                -webkit-print-color-adjust: exact !important; 
+                print-color-adjust: exact !important; 
+                background-color: ${isDark ? '#0a0a0a' : '#ffffff'} !important;
+              }
+              * { overflow: visible !important; }
+            }
+          </style>
+        </head>
+        <body class="${document.documentElement.className} ${bgClass}">
+          <div class="p-8">
+            ${element.innerHTML}
+          </div>
+        </body>
+      </html>
+    `)
+    doc.close()
+
+    iframe.contentWindow?.focus()
+
+    // Give browser time to load styles and fonts before printing
+    setTimeout(() => {
+      iframe.contentWindow?.print()
+      setTimeout(() => {
+        document.body.removeChild(iframe)
+      }, 1000)
+    }, 500)
+  } catch (err) {
+    console.error('Failed to generate PDF:', err)
+  }
 }
 
 interface MarkdownEditorProps {
@@ -420,6 +500,28 @@ export default function MarkdownEditor({
           <button
             onClick={() => {
               if (slug && previewRef.current) {
+                handlePdfDownload(previewRef.current, 'document.pdf')
+              }
+            }}
+            disabled={!slug}
+            title={
+              !slug
+                ? 'Save or create document first to download'
+                : 'Download as PDF (.pdf)'
+            }
+            className={cn(
+              'flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-colors',
+              !slug
+                ? 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
+                : 'text-zinc-600 dark:text-zinc-400 hover:text-red-600 dark:hover:text-red-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50'
+            )}
+          >
+            <Download size={14} />
+            <span className='sr-only md:not-sr-only'>PDF</span>
+          </button>
+          <button
+            onClick={() => {
+              if (slug && previewRef.current) {
                 handleDocDownload(previewRef.current.innerHTML, 'document.doc')
               }
             }}
@@ -437,6 +539,7 @@ export default function MarkdownEditor({
             )}
           >
             <Download size={14} />
+            <span className='sr-only md:not-sr-only'>DOC</span>
           </button>
         </div>
         <div
