@@ -4,6 +4,7 @@ import {
   Braces,
   File,
   FileText,
+  History,
   Home,
   LinkIcon,
   UploadCloud,
@@ -27,6 +28,7 @@ interface Props {
   onCreateNewDocument: (x: ShareType) => void
   onOpenShareModal: (x: boolean) => void
   onOpenUploadModal: (x: boolean) => void
+  onOpenHistoryModal: (x: boolean) => void
 }
 
 const EditorHeader = ({
@@ -38,6 +40,7 @@ const EditorHeader = ({
   isAutoSaving,
   onOpenShareModal,
   currentViewMode,
+  onOpenHistoryModal,
 }: Props) => {
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
@@ -103,10 +106,26 @@ const EditorHeader = ({
           icon={<FileText size={14} />}
           isActive={documentType === 'markdown'}
         />
+
+        <EditorActionBtn
+          onClick={() => onOpenHistoryModal(true)}
+          documentType={documentType}
+          label='History'
+          title='Open Local History'
+          icon={<History size={14} />}
+        />
       </div>
 
       {/* Mobile Actions (Visible only on small screens) */}
       <div className='flex md:hidden items-center gap-1.5'>
+        <EditorActionBtn
+          onClick={() => onOpenHistoryModal(true)}
+          documentType={documentType}
+          label='History'
+          title='Open Local History'
+          icon={<History size={14} />}
+        />
+
         <EditorActionBtn
           href={
             documentType === 'text'
@@ -132,6 +151,19 @@ const EditorHeader = ({
             documentType !== 'text' && 'dark:bg-zinc-800'
           )}
         />
+
+        <button
+          onClick={() => onOpenHistoryModal(true)}
+          className={cn(
+            'p-2 rounded-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:outline-none text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 hover:cursor-pointer',
+            documentType !== 'text' &&
+              'dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
+          )}
+          title='Open Local History'
+          aria-label='Open Local History'
+        >
+          <History size={18} />
+        </button>
 
         {/* Share Button (Icon Button) */}
         <button
