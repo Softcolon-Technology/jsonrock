@@ -26,6 +26,7 @@ import { getSocket } from '@/lib/socket'
 import { ModalAlert } from '../components/ui/ModalAlert'
 import { Toast } from '../components/ui/Toast'
 import { SharePopover } from '../components/SharePopover'
+import LocalHistoryModal from '../components/editor/local-history-modal'
 import Cookies from 'js-cookie'
 import { JsonRockLoader } from '../components/Loader'
 
@@ -39,6 +40,14 @@ import { useDebounce } from '@/hooks/useDebounce'
 import dynamic from 'next/dynamic'
 import EditorHeader from '../components/editor/editor-header'
 import { ShareType } from '../iterface'
+import {
+  clearLocalDocuments,
+  deleteLocalDocumentBySlug,
+  getLocalDocumentBySlug,
+  listLocalDocuments,
+  LocalDocumentRecord,
+  saveLocalDocument,
+} from '@/lib/local-docs'
 
 const RichTextEditor = dynamic(() => import('../components/RichTextEditor'), {
   ssr: false,
@@ -146,6 +155,11 @@ export default function Home({
   } | null>(null)
 
   const [toastState, setToastState] = useState({ isOpen: false, message: '' })
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false)
+  const [localDocuments, setLocalDocuments] = useState<LocalDocumentRecord[]>(
+    []
+  )
 
   const effectiveValidationError = jsonValidationError || monacoValidationError
   const isDocValid =
@@ -259,6 +273,32 @@ export default function Home({
     [checkOwnership]
   )
 
+  const syncFromLocalRecord = useCallback(
+    (record: LocalDocumentRecord) => {
+      const content = record.content || ''
+      const resolvedMode: JsonShareMode =
+        record.type === 'json'
+          ? paramView || record.mode || 'visualize'
+          : 'formatter'
+
+      setCurrentJsonContent(content)
+      setDocumentSlug(record.slug)
+      setDocumentType(record.type)
+      setIsDocumentPrivate(record.isPrivate)
+      setUserAccessLevel(record.accessType)
+      setCurrentViewMode(resolvedMode)
+      setSyncedRemoteContent({ code: content, nonce: Date.now() })
+
+      setIsPasswordLocked(false)
+      setIsPrivacyLocked(record.isPrivate)
+      setHasEditPermission(true)
+      setIsCurrentUserOwner(true)
+
+      lastPersistedContentRef.current = content
+    },
+    [paramView]
+  )
+
   // Track whether this is the first mount — SSR already provided initialRecord, no need to re-fetch
   const isInitialMountRef = React.useRef(!!initialRecord)
 
@@ -296,26 +336,50 @@ export default function Home({
       setIsPageLoading(true)
       const controller = new AbortController()
 
-      fetch(`/api/share/${urlSlug}`, { signal: controller.signal })
-        .then((res) => {
-          if (!res.ok) throw new Error('Failed to load')
-          return res.json()
-        })
-        .then((data) => {
+      const loadDocument = async () => {
+        try {
+          const res = await fetch(`/api/share/${urlSlug}`, {
+            signal: controller.signal,
+          })
+
+          if (!res.ok) {
+            throw new Error('Failed to load')
+          }
+
+          const data = await res.json()
           if (data && !data.error) {
             syncFromData(data)
+            return
           }
-        })
-        .catch((err) => {
-          if (err.name !== 'AbortError') {
-            console.error('Fetch error', err)
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') {
+            return
           }
-        })
-        .finally(() => {
+
+          try {
+            const localRecord = await getLocalDocumentBySlug(urlSlug)
+            if (localRecord && !controller.signal.aborted) {
+              syncFromLocalRecord(localRecord)
+              setToastState({
+                isOpen: true,
+                message:
+                  'Loaded from local browser storage (remote record unavailable).',
+              })
+              return
+            }
+          } catch (localError) {
+            console.error('Local fallback error', localError)
+          }
+
+          console.error('Fetch error', err)
+        } finally {
           if (!controller.signal.aborted) {
             setIsPageLoading(false)
           }
-        })
+        }
+      }
+
+      loadDocument()
 
       return () => controller.abort()
     } else {
@@ -344,7 +408,7 @@ export default function Home({
       resetWorker()
       setIsPageLoading(false)
     }
-  }, [urlSlug, featureMode, syncFromData, resetWorker])
+  }, [urlSlug, featureMode, syncFromData, syncFromLocalRecord, resetWorker])
 
   // Sync currentViewMode with URL parameter changes (for browser back/forward navigation)
   useEffect(() => {
@@ -496,6 +560,119 @@ export default function Home({
   const dismissAlert = () => {
     setAlertState((prev) => ({ ...prev, isOpen: false }))
   }
+
+  const loadLocalHistory = useCallback(async () => {
+    setIsHistoryLoading(true)
+    try {
+      const records = await listLocalDocuments()
+      setLocalDocuments(records)
+    } catch (error) {
+      console.error('Failed to load local history', error)
+    } finally {
+      setIsHistoryLoading(false)
+    }
+  }, [])
+
+  const getRouteForDocument = useCallback(
+    (type: ShareType, slug: string, mode?: JsonShareMode) => {
+      const basePath =
+        type === 'text'
+          ? '/editor/text/'
+          : type === 'markdown'
+            ? '/editor/markdown/'
+            : '/editor/'
+
+      const viewParam = type === 'json' ? `?view=${mode || 'visualize'}` : ''
+      return `${basePath}${slug}${viewParam}`
+    },
+    []
+  )
+
+  const handleOpenLocalDocument = useCallback(
+    (record: LocalDocumentRecord) => {
+      syncFromLocalRecord(record)
+      const nextUrl = getRouteForDocument(record.type, record.slug, record.mode)
+
+      window.history.pushState(
+        { ...window.history.state, as: nextUrl, url: nextUrl },
+        '',
+        nextUrl
+      )
+
+      setIsHistoryModalOpen(false)
+    },
+    [getRouteForDocument, syncFromLocalRecord]
+  )
+
+  const handleDeleteLocalDocument = useCallback(async (slug: string) => {
+    try {
+      await deleteLocalDocumentBySlug(slug)
+      setLocalDocuments((prev) => prev.filter((item) => item.slug !== slug))
+    } catch (error) {
+      console.error('Failed to delete local document', error)
+    }
+  }, [])
+
+  const handleClearLocalDocuments = useCallback(async () => {
+    try {
+      await clearLocalDocuments()
+      setLocalDocuments([])
+    } catch (error) {
+      console.error('Failed to clear local history', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadLocalHistory()
+  }, [loadLocalHistory])
+
+  useEffect(() => {
+    if (isHistoryModalOpen) {
+      loadLocalHistory()
+    }
+  }, [isHistoryModalOpen, loadLocalHistory])
+
+  const debouncedContentForLocalStorage = useDebounce(currentJsonContent, 800)
+
+  useEffect(() => {
+    if (!documentSlug) return
+    if (isPasswordLocked) return
+
+    const modeToStore: JsonShareMode =
+      documentType === 'json' ? currentViewMode : 'formatter'
+
+    saveLocalDocument({
+      slug: documentSlug,
+      type: documentType,
+      mode: modeToStore,
+      content: debouncedContentForLocalStorage,
+      isPrivate: isDocumentPrivate,
+      accessType: userAccessLevel,
+    })
+      .then((savedRecord) => {
+        if (!savedRecord) return
+
+        setLocalDocuments((previous) => {
+          const remaining = previous.filter(
+            (item) => item.slug !== savedRecord.slug
+          )
+          return [savedRecord, ...remaining].sort(
+            (a, b) => b.updatedAt - a.updatedAt
+          )
+        })
+      })
+      .catch((error) => {
+        console.error('Failed to store local document', error)
+      })
+  }, [
+    documentSlug,
+    documentType,
+    currentViewMode,
+    debouncedContentForLocalStorage,
+    isDocumentPrivate,
+    userAccessLevel,
+    isPasswordLocked,
+  ])
 
   const handleUnlockDocument = async () => {
     if (!initialRecord?.slug) return
@@ -1239,6 +1416,7 @@ export default function Home({
           onCreateNewDocument={handleCreateNewDocument}
           isAutoSaving={isAutoSaving}
           onOpenShareModal={setIsShareModalOpen}
+          onOpenHistoryModal={setIsHistoryModalOpen}
           currentViewMode={currentViewMode}
         />
 
@@ -1851,6 +2029,18 @@ export default function Home({
           </div>
         </div>
       )}
+
+      <LocalHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        documents={localDocuments}
+        activeSlug={documentSlug}
+        isLoading={isHistoryLoading}
+        onOpenDocument={handleOpenLocalDocument}
+        onDeleteDocument={handleDeleteLocalDocument}
+        onClearAll={handleClearLocalDocuments}
+        forceLightMode={documentType === 'text'}
+      />
 
       <SharePopover
         isOpen={isShareModalOpen}
