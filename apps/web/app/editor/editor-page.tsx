@@ -678,11 +678,15 @@ export default function Home({
     if (!initialRecord?.slug) return
     setIsUnlocking(true)
     setUnlockErrorMessage(null)
+
+    // Capture the password before the async call so it survives any re-renders
+    const password = documentPassword
+
     try {
       const res = await fetch(`/api/share/${initialRecord.slug}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: documentPassword }),
+        body: JSON.stringify({ password }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -690,7 +694,8 @@ export default function Home({
         return
       }
 
-      // Success
+      // Success — persist the password so auto-save can re-encrypt
+      setDocumentPassword(password)
       syncFromData(data)
 
       // Check if I am actually the owner (maybe I created it on this device?)

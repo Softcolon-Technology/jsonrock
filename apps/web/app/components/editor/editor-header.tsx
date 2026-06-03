@@ -4,6 +4,7 @@ import {
   Braces,
   File,
   FileText,
+  GitCompareArrows,
   History,
   Home,
   LinkIcon,
@@ -107,12 +108,13 @@ const EditorHeader = ({
           isActive={documentType === 'markdown'}
         />
 
+        {/* Diff Checker */}
         <EditorActionBtn
-          onClick={() => onOpenHistoryModal(true)}
+          href='/diff'
           documentType={documentType}
-          label='History'
-          title='Open Local History'
-          icon={<History size={14} />}
+          label='Diff Checker'
+          title='JSON Diff Checker'
+          icon={<GitCompareArrows size={14} />}
         />
       </div>
 

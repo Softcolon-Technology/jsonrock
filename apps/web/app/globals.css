@@ -337,6 +337,43 @@ pre[class*="bg-zinc"]::-webkit-scrollbar-corner {
   stroke-width: 20 !important;
 }
 
+/* === Diff Editor Overrides === */
+/* Ensure the diff editor container fills its parent and has consistent borders */
+.diff-editor-container .monaco-diff-editor {
+  border-radius: 0 !important;
+}
+
+.diff-editor-container .monaco-editor {
+  border-radius: 0 !important;
+}
+
+/* Diff editor gutter (the center "change" column between sides) */
+.diff-editor-container .monaco-diff-editor .diffViewport {
+  background: transparent !important;
+}
+
+/* Diff colors — slightly softer for light mode */
+.diff-editor-container .monaco-editor .line-insert,
+.diff-editor-container .monaco-editor .char-insert {
+  background: rgba(34, 197, 94, 0.12) !important;
+}
+
+.diff-editor-container .monaco-editor .line-delete,
+.diff-editor-container .monaco-editor .char-delete {
+  background: rgba(239, 68, 68, 0.12) !important;
+}
+
+/* Dark mode diff colors — richer tones */
+.dark .diff-editor-container .monaco-editor .line-insert,
+.dark .diff-editor-container .monaco-editor .char-insert {
+  background: rgba(34, 197, 94, 0.15) !important;
+}
+
+.dark .diff-editor-container .monaco-editor .line-delete,
+.dark .diff-editor-container .monaco-editor .char-delete {
+  background: rgba(239, 68, 68, 0.15) !important;
+}
+
 /* Tiptap Placeholder Extension Support */
 .tiptap .is-editor-empty:first-child::before,
 .tiptap .is-empty::before {

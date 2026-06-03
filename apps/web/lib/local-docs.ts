@@ -74,6 +74,77 @@ function normalizePreview(content: string): string {
 }
 
 function deriveTitle(content: string, type: LocalDocumentType): string {
+  // ── JSON: parse and extract a meaningful title ──
+  if (type === 'json') {
+    try {
+      const parsed = JSON.parse(content.trim())
+
+      // Arrays → "Array (N items)"
+      if (Array.isArray(parsed)) {
+        if (parsed.length === 0) return 'Empty Array'
+        // Try to describe the first element
+        const first = parsed[0]
+        if (first && typeof first === 'object' && first !== null) {
+          const keys = Object.keys(first)
+          return `Array (${parsed.length} items) — {${keys.slice(0, 3).join(', ')}}`
+        }
+        return `Array (${parsed.length} items)`
+      }
+
+      // Objects → look for common "title-like" keys
+      if (parsed && typeof parsed === 'object') {
+        const titleKeys = [
+          'title',
+          'name',
+          'label',
+          'heading',
+          'subject',
+          'id',
+          'key',
+          'slug',
+          'description',
+          'summary',
+        ]
+
+        for (const key of titleKeys) {
+          // Case-insensitive lookup
+          const match = Object.keys(parsed).find((k) => k.toLowerCase() === key)
+          if (match && parsed[match] != null) {
+            const val = parsed[match]
+            const str =
+              typeof val === 'string'
+                ? val
+                : typeof val === 'number' || typeof val === 'boolean'
+                  ? String(val)
+                  : null
+            if (str) return str.slice(0, 60)
+          }
+        }
+
+        // Fallback: show the first key-value pair
+        const keys = Object.keys(parsed)
+        if (keys.length > 0) {
+          const firstKey = keys[0]!
+          const firstVal = parsed[firstKey]
+          if (
+            typeof firstVal === 'string' ||
+            typeof firstVal === 'number' ||
+            typeof firstVal === 'boolean'
+          ) {
+            return `${firstKey}: ${String(firstVal)}`.slice(0, 60)
+          }
+          // If the value is complex, just show key count
+          return `{${keys.slice(0, 4).join(', ')}${keys.length > 4 ? ', …' : ''}}`
+        }
+
+        return 'Empty Object'
+      }
+    } catch {
+      // Not valid JSON — fall through to first-line logic
+    }
+  }
+
+  // ── Markdown: strip heading markers ──
   const firstLine = content
     .split('\n')
     .map((line) => line.trim())
@@ -87,6 +158,7 @@ function deriveTitle(content: string, type: LocalDocumentType): string {
     return firstLine.replace(/^#+\s*/, '').slice(0, 60) || DEFAULT_TITLE[type]
   }
 
+  // ── Text / fallback ──
   return firstLine.slice(0, 60)
 }
 
