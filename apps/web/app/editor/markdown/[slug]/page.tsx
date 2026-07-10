@@ -1,5 +1,4 @@
 import { Suspense } from 'react'
-import { redirect } from 'next/navigation'
 import EditorPage from '../../editor-page'
 import { FullScreenLoader } from '../../../components/Loader'
 
@@ -38,13 +37,9 @@ export default async function EditorMarkdownSlugPage({ params }: Props) {
         accessType: data.accessType || 'editor',
         createdAt: new Date().toISOString(),
       }
-    } else {
-      // Record doesn't exist - redirect to editor
-      redirect('/editor')
     }
   } catch (error) {
     console.error('Error fetching share link:', error)
-    redirect('/editor')
   }
 
   return (

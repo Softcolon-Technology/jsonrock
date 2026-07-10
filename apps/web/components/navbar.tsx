@@ -3,17 +3,29 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { Menu, X, Sparkles, Monitor, Wrench, Star, Rocket } from 'lucide-react'
+import {
+  Menu,
+  X,
+  Sparkles,
+  Monitor,
+  Wrench,
+  Star,
+  Rocket,
+  GitCompareArrows,
+} from 'lucide-react'
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
   const sidebarRef = useRef<HTMLDivElement>(null)
 
-  // Smooth scroll handler
+  // Smooth scroll handler (only for anchor links)
   const handleSmoothScroll = (
     e: React.MouseEvent<HTMLAnchorElement>,
     href: string
   ) => {
+    // Route links (e.g. /diff) — let the browser navigate normally
+    if (!href.startsWith('#')) return
+
     e.preventDefault()
     const targetId = href.replace('#', '')
     const element = document.getElementById(targetId)
@@ -61,6 +73,7 @@ export default function Navbar() {
   const navLinks = [
     { href: '#features', label: 'Features', icon: Sparkles },
     { href: '#showcase', label: 'Showcase', icon: Monitor },
+    { href: '/diff', label: 'Diff Checker', icon: GitCompareArrows },
   ]
 
   return (
