@@ -386,5 +386,29 @@ pre[class*="bg-zinc"]::-webkit-scrollbar-corner {
 
 .dark .tiptap .is-editor-empty:first-child::before,
 .dark .tiptap .is-empty::before {
-  color: #52525b !important; /* zinc-600 */
+  color: #52525b !important;
+  /* zinc-600 */
+}
+
+/* Tiptap Table Extension Styling */
+.tiptap table .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background-color: #00b3b7;
+  /* Primary Color */
+  pointer-events: none;
+}
+
+.tiptap.resize-cursor {
+  cursor: ew-resize;
+  cursor: col-resize;
+}
+
+.tiptap table td,
+.tiptap table th {
+  position: relative;
+  /* Required for the resize handle to position correctly */
 }

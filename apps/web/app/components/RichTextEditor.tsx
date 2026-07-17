@@ -15,6 +15,10 @@ import { Link as TiptapLink } from '@tiptap/extension-link'
 import { Image as TiptapImage } from '@tiptap/extension-image'
 import Placeholder from '@tiptap/extension-placeholder'
 import CodeBlock from '@tiptap/extension-code-block'
+import { Table } from '@tiptap/extension-table'
+import { TableRow } from '@tiptap/extension-table-row'
+import { TableCell } from '@tiptap/extension-table-cell'
+import { TableHeader } from '@tiptap/extension-table-header'
 import { Extension, Mark, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { CodeBlockComponent } from './editor/CodeBlockComponent'
@@ -1227,6 +1231,30 @@ const RichTextEditor = ({
       TiptapLink.configure({ openOnClick: false }),
       TiptapImage,
       TabKey,
+      Table.configure({
+        resizable: true,
+        HTMLAttributes: {
+          class:
+            'border-collapse table-fixed w-full border border-zinc-300 dark:border-zinc-700 my-4',
+        },
+      }),
+      TableRow.configure({
+        HTMLAttributes: {
+          class: 'border-b border-zinc-300 dark:border-zinc-700',
+        },
+      }),
+      TableHeader.configure({
+        HTMLAttributes: {
+          class:
+            'border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 px-3 py-2 text-left font-semibold relative',
+        },
+      }),
+      TableCell.configure({
+        HTMLAttributes: {
+          class:
+            'border border-zinc-300 dark:border-zinc-700 px-3 py-2 relative',
+        },
+      }),
     ],
     content: content,
     editable: !readOnly,
