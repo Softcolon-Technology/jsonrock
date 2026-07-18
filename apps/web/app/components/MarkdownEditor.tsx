@@ -1,12 +1,315 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import rehypeSanitize from 'rehype-sanitize'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import rehypeRaw from 'rehype-raw'
+import rehypeSlug from 'rehype-slug'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import {
+  vscDarkPlus,
+  oneLight,
+} from 'react-syntax-highlighter/dist/esm/styles/prism'
+import matter from 'gray-matter'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
-import { UploadCloud, Download } from 'lucide-react'
+import {
+  UploadCloud,
+  Download,
+  Copy,
+  Check,
+  List,
+  X,
+  Tag,
+  Calendar,
+  User,
+} from 'lucide-react'
+import mermaid from 'mermaid'
+
+// ─── Mermaid Diagram ────────────────────────────────────────────────────────
+
+const mermaidCache = new Map<string, string>()
+const mermaidPrefixCache = new Map<string, string>()
+
+const getIsDarkMode = () =>
+  typeof document !== 'undefined' &&
+  document.documentElement.classList.contains('dark')
+
+const getMermaidConfig = (isDark: boolean) => ({
+  startOnLoad: false,
+  securityLevel: 'loose' as const,
+  theme: isDark ? ('dark' as const) : ('default' as const),
+  themeVariables: isDark
+    ? {
+        // Base
+        background: '#18181b',
+        primaryColor: '#27272a',
+        primaryTextColor: '#fafafa',
+        primaryBorderColor: '#a1a1aa',
+        secondaryColor: '#3f3f46',
+        secondaryTextColor: '#f4f4f5',
+        secondaryBorderColor: '#71717a',
+        tertiaryColor: '#27272a',
+        tertiaryTextColor: '#f4f4f5',
+        tertiaryBorderColor: '#52525b',
+        lineColor: '#a1a1aa',
+        textColor: '#fafafa',
+        mainBkg: '#27272a',
+        nodeBorder: '#a1a1aa',
+        clusterBkg: '#27272a',
+        titleColor: '#fafafa',
+        edgeLabelBackground: '#27272a',
+        // Sequence diagrams (arrows + labels were near-invisible on dark bg)
+        actorBkg: '#3f3f46',
+        actorBorder: '#a78bfa',
+        actorTextColor: '#fafafa',
+        actorLineColor: '#71717a',
+        signalColor: '#e4e4e7',
+        signalTextColor: '#fafafa',
+        labelBoxBkgColor: '#27272a',
+        labelBoxBorderColor: '#71717a',
+        labelTextColor: '#fafafa',
+        loopTextColor: '#fafafa',
+        noteBkgColor: '#3f3f46',
+        noteTextColor: '#fafafa',
+        noteBorderColor: '#71717a',
+        activationBkgColor: '#52525b',
+        activationBorderColor: '#a1a1aa',
+        sequenceNumberColor: '#18181b',
+      }
+    : undefined,
+})
+
+const Mermaid = ({ chart }: { chart: string }) => {
+  const prefix = chart.substring(0, 30)
+  const [isDark, setIsDark] = useState(getIsDarkMode)
+  const cacheKey = `${isDark ? 'dark' : 'light'}:${chart}`
+  const prefixKey = `${isDark ? 'dark' : 'light'}:${prefix}`
+
+  const [svg, setSvg] = useState<string>(() => {
+    return mermaidCache.get(cacheKey) || mermaidPrefixCache.get(prefixKey) || ''
+  })
+
+  // Keep theme in sync when the app toggles dark/light mode
+  useEffect(() => {
+    const syncTheme = () => setIsDark(getIsDarkMode())
+    syncTheme()
+    const observer = new MutationObserver(syncTheme)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    })
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (mermaidCache.has(cacheKey)) {
+      setSvg(mermaidCache.get(cacheKey)!)
+      return
+    }
+
+    // Restore last valid diagram for this theme while typing (anti-blink)
+    const cachedPrefix = mermaidPrefixCache.get(prefixKey)
+    if (cachedPrefix) setSvg(cachedPrefix)
+
+    mermaid.initialize(getMermaidConfig(isDark))
+
+    let isMounted = true
+
+    const renderChart = async () => {
+      try {
+        await mermaid.parse(chart)
+        if (!isMounted) return
+        const renderId = `mermaid-${Math.random().toString(36).substring(2, 10)}`
+        const { svg: newSvg } = await mermaid.render(renderId, chart)
+        if (isMounted) {
+          mermaidCache.set(cacheKey, newSvg)
+          mermaidPrefixCache.set(prefixKey, newSvg)
+          setSvg(newSvg)
+        }
+      } catch {
+        // keep last valid svg on parse/render error
+      }
+    }
+
+    // Debounce while typing; re-theme immediately when dark/light toggles
+    const alreadyRendered =
+      mermaidCache.has(`dark:${chart}`) || mermaidCache.has(`light:${chart}`)
+    const timeoutId = setTimeout(renderChart, alreadyRendered ? 0 : 400)
+    return () => {
+      isMounted = false
+      clearTimeout(timeoutId)
+    }
+  }, [chart, cacheKey, prefixKey, isDark])
+
+  return svg ? (
+    <div
+      dangerouslySetInnerHTML={{ __html: svg }}
+      className={cn(
+        'flex justify-center my-4 overflow-x-auto rounded-lg p-4 shadow-sm border',
+        isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-white border-zinc-200'
+      )}
+    />
+  ) : (
+    <pre className='bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded text-sm text-zinc-500 italic border border-zinc-200 dark:border-zinc-800 my-4'>
+      Rendering diagram...
+    </pre>
+  )
+}
+
+// ─── Copy Button ─────────────────────────────────────────────────────────────
+
+const CopyButton = ({ code }: { code: string }) => {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {}
+  }
+  return (
+    <button
+      onClick={handleCopy}
+      title='Copy code'
+      className='absolute top-2.5 right-2.5 flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold uppercase tracking-wider transition-all duration-200 bg-zinc-700/60 hover:bg-zinc-600/80 text-zinc-300 hover:text-white border border-zinc-600/40'
+    >
+      {copied ? (
+        <>
+          <Check className='w-3 h-3' />
+          Copied
+        </>
+      ) : (
+        <>
+          <Copy className='w-3 h-3' />
+          Copy
+        </>
+      )}
+    </button>
+  )
+}
+
+// ─── Front-Matter Banner ─────────────────────────────────────────────────────
+
+const FrontMatterBanner = ({ data }: { data: Record<string, any> }) => {
+  if (!data || Object.keys(data).length === 0) return null
+
+  const { title, date, author, tags, ...rest } = data
+
+  return (
+    <div className='mb-6 p-4 rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/60 dark:bg-emerald-950/20 shadow-sm'>
+      {title && (
+        <h1 className='text-2xl font-bold text-emerald-800 dark:text-emerald-300 mb-2'>
+          {String(title)}
+        </h1>
+      )}
+      <div className='flex flex-wrap gap-3 text-xs text-zinc-500 dark:text-zinc-400'>
+        {author && (
+          <span className='flex items-center gap-1'>
+            <User className='w-3 h-3' />
+            {String(author)}
+          </span>
+        )}
+        {date && (
+          <span className='flex items-center gap-1'>
+            <Calendar className='w-3 h-3' />
+            {String(date)}
+          </span>
+        )}
+        {tags && (
+          <span className='flex items-center gap-1 flex-wrap'>
+            <Tag className='w-3 h-3 shrink-0' />
+            {(Array.isArray(tags) ? tags : [tags]).map((t: any) => (
+              <span
+                key={t}
+                className='px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 font-medium'
+              >
+                {String(t)}
+              </span>
+            ))}
+          </span>
+        )}
+        {Object.entries(rest).map(([k, v]) => (
+          <span key={k} className='flex items-center gap-1'>
+            <span className='font-semibold'>{k}:</span> {String(v)}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Table of Contents ───────────────────────────────────────────────────────
+
+interface TocItem {
+  id: string
+  text: string
+  level: number
+}
+
+const extractToc = (markdown: string): TocItem[] => {
+  const lines = markdown.split('\n')
+  const items: TocItem[] = []
+  for (const line of lines) {
+    const match = /^(#{1,6})\s+(.+)$/.exec(line.trim())
+    if (match && match[1] && match[2]) {
+      const level = match[1].length
+      const text = match[2].replace(/\*\*|__|\*|_|`|~~|#+/g, '').trim()
+      const id = text
+        .toLowerCase()
+        .replace(/[^\w\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+      items.push({ id, text, level })
+    }
+  }
+  return items
+}
+
+const TableOfContents = ({
+  items,
+  onClose,
+}: {
+  items: TocItem[]
+  onClose: () => void
+}) => {
+  if (items.length === 0) return null
+  const minLevel = Math.min(...items.map((i) => i.level))
+
+  return (
+    <div className='absolute top-0 right-0 bottom-0 z-30 w-72 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-sm border-l border-zinc-200 dark:border-zinc-800 flex flex-col shadow-xl'>
+      <div className='flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0'>
+        <span className='text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400'>
+          Table of Contents
+        </span>
+        <button
+          onClick={onClose}
+          className='p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors'
+        >
+          <X className='w-3.5 h-3.5' />
+        </button>
+      </div>
+      <nav className='flex-1 overflow-y-auto p-3 space-y-0.5'>
+        {items.map((item, i) => (
+          <a
+            key={i}
+            href={`#${item.id}`}
+            onClick={onClose}
+            style={{ paddingLeft: `${(item.level - minLevel) * 12 + 8}px` }}
+            className='block py-1.5 pr-2 text-sm rounded text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors truncate'
+          >
+            {item.text}
+          </a>
+        ))}
+      </nav>
+    </div>
+  )
+}
+
+// ─── Download Helpers ────────────────────────────────────────────────────────
 
 const handleMarkdownDownload = async (
   content: string,
@@ -33,9 +336,7 @@ const handleMarkdownDownload = async (
     if (err.name !== 'AbortError') console.error(err)
     if (err.name === 'AbortError') return
   }
-
   if (filePicked) return
-
   const blob = new Blob([content], { type: 'text/markdown' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -53,7 +354,6 @@ const handleDocDownload = async (
     "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export Document</title></head><body>"
   const footer = '</body></html>'
   const sourceHTML = header + htmlContent + footer
-
   let filePicked = false
   try {
     if ('showSaveFilePicker' in window) {
@@ -75,9 +375,7 @@ const handleDocDownload = async (
     if (err.name !== 'AbortError') console.error(err)
     if (err.name === 'AbortError') return
   }
-
   if (filePicked) return
-
   const blob = new Blob([sourceHTML], {
     type: 'application/msword;charset=utf-8',
   })
@@ -95,30 +393,26 @@ const handlePdfDownload = async (
 ) => {
   try {
     const iframe = document.createElement('iframe')
-    iframe.style.position = 'fixed'
-    iframe.style.right = '0'
-    iframe.style.bottom = '0'
-    iframe.style.width = '0'
-    iframe.style.height = '0'
-    iframe.style.border = '0'
+    Object.assign(iframe.style, {
+      position: 'fixed',
+      right: '0',
+      bottom: '0',
+      width: '0',
+      height: '0',
+      border: '0',
+    })
     document.body.appendChild(iframe)
-
     const doc = iframe.contentWindow?.document
     if (!doc) return
-
     doc.open()
-
-    // Grab all stylesheets to ensure 100% Tailwind CSS fidelity
     const styles = Array.from(
       document.querySelectorAll('style, link[rel="stylesheet"]')
     )
       .map((s) => s.outerHTML)
       .join('\n')
-
     const isDark = document.documentElement.classList.contains('dark')
     const bgClass = isDark ? 'bg-[#0a0a0a]' : 'bg-white'
     const title = requestedFilename.replace(/\.pdf$/, '')
-
     doc.write(`
       <html>
         <head>
@@ -127,29 +421,18 @@ const handlePdfDownload = async (
           <style>
             @media print {
               @page { margin: 0; }
-              body { 
-                margin: 0; 
-                padding: 15mm;
-                -webkit-print-color-adjust: exact !important; 
-                print-color-adjust: exact !important; 
-                background-color: ${isDark ? '#0a0a0a' : '#ffffff'} !important;
-              }
+              body { margin: 0; padding: 15mm; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background-color: ${isDark ? '#0a0a0a' : '#ffffff'} !important; }
               * { overflow: visible !important; }
             }
           </style>
         </head>
         <body class="${document.documentElement.className} ${bgClass}">
-          <div class="p-8">
-            ${element.innerHTML}
-          </div>
+          <div class="p-8">${element.innerHTML}</div>
         </body>
       </html>
     `)
     doc.close()
-
     iframe.contentWindow?.focus()
-
-    // Give browser time to load styles and fonts before printing
     setTimeout(() => {
       iframe.contentWindow?.print()
       setTimeout(() => {
@@ -161,43 +444,60 @@ const handlePdfDownload = async (
   }
 }
 
-interface MarkdownEditorProps {
-  content: string
-  onChange: (value: string) => void
-  readOnly?: boolean
-  onFileDrop?: (file: File) => Promise<void>
-  slug?: string | null
-}
+// ─── Markdown Components ─────────────────────────────────────────────────────
 
-// Custom components for every markdown element — fully styled for dark/light mode
-const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
-  h1: ({ children }) => (
-    <h1 className='text-3xl font-bold text-zinc-900 dark:text-zinc-100 mt-8 mb-4 pb-2 border-b border-zinc-200 dark:border-zinc-700 first:mt-0 leading-tight'>
+const isDarkMode = () =>
+  typeof document !== 'undefined' &&
+  document.documentElement.classList.contains('dark')
+
+const buildMdComponents = (): React.ComponentProps<
+  typeof ReactMarkdown
+>['components'] => ({
+  h1: ({ children, id }) => (
+    <h1
+      id={id}
+      className='text-3xl font-bold text-zinc-900 dark:text-zinc-100 mt-8 mb-4 pb-2 border-b border-zinc-200 dark:border-zinc-700 first:mt-0 leading-tight scroll-mt-4'
+    >
       {children}
     </h1>
   ),
-  h2: ({ children }) => (
-    <h2 className='text-2xl font-bold text-zinc-800 dark:text-zinc-200 mt-7 mb-3 pb-1.5 border-b border-zinc-200 dark:border-zinc-700 leading-tight'>
+  h2: ({ children, id }) => (
+    <h2
+      id={id}
+      className='text-2xl font-bold text-zinc-800 dark:text-zinc-200 mt-7 mb-3 pb-1.5 border-b border-zinc-200 dark:border-zinc-700 leading-tight scroll-mt-4'
+    >
       {children}
     </h2>
   ),
-  h3: ({ children }) => (
-    <h3 className='text-xl font-semibold text-zinc-800 dark:text-zinc-200 mt-6 mb-2.5 leading-tight'>
+  h3: ({ children, id }) => (
+    <h3
+      id={id}
+      className='text-xl font-semibold text-zinc-800 dark:text-zinc-200 mt-6 mb-2.5 leading-tight scroll-mt-4'
+    >
       {children}
     </h3>
   ),
-  h4: ({ children }) => (
-    <h4 className='text-lg font-semibold text-zinc-700 dark:text-zinc-300 mt-5 mb-2 leading-tight'>
+  h4: ({ children, id }) => (
+    <h4
+      id={id}
+      className='text-lg font-semibold text-zinc-700 dark:text-zinc-300 mt-5 mb-2 leading-tight scroll-mt-4'
+    >
       {children}
     </h4>
   ),
-  h5: ({ children }) => (
-    <h5 className='text-base font-semibold text-zinc-700 dark:text-zinc-300 mt-4 mb-1.5 leading-tight'>
+  h5: ({ children, id }) => (
+    <h5
+      id={id}
+      className='text-base font-semibold text-zinc-700 dark:text-zinc-300 mt-4 mb-1.5 leading-tight scroll-mt-4'
+    >
       {children}
     </h5>
   ),
-  h6: ({ children }) => (
-    <h6 className='text-sm font-semibold text-zinc-500 dark:text-zinc-400 mt-4 mb-1.5 uppercase tracking-wide leading-tight'>
+  h6: ({ children, id }) => (
+    <h6
+      id={id}
+      className='text-sm font-semibold text-zinc-500 dark:text-zinc-400 mt-4 mb-1.5 uppercase tracking-wide leading-tight scroll-mt-4'
+    >
       {children}
     </h6>
   ),
@@ -246,20 +546,63 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
       {children}
     </blockquote>
   ),
-  code: ({ className, children, node, ...props }: any) => {
+  // ── Code (inline & fenced) ──────────────────────────────────────────────
+  code: ({ className, children, ...props }: any) => {
+    const match = /language-(\w+)/.exec(className || '')
+    const lang = match?.[1]
+    const codeString = String(children).replace(/\n$/, '')
+
+    // Mermaid diagram
+    if (lang === 'mermaid') {
+      return <Mermaid chart={codeString} />
+    }
+
+    // Fenced code block with language → syntax highlighting
+    if (lang) {
+      return (
+        <div className='relative my-4 rounded-lg overflow-hidden border border-zinc-700/50 shadow-md group'>
+          {/* Language badge */}
+          <div className='flex items-center justify-between px-4 py-1.5 bg-zinc-800 border-b border-zinc-700/50'>
+            <span className='text-[10px] font-bold uppercase tracking-widest text-zinc-400'>
+              {lang}
+            </span>
+          </div>
+          <CopyButton code={codeString} />
+          <SyntaxHighlighter
+            language={lang}
+            style={isDarkMode() ? vscDarkPlus : oneLight}
+            customStyle={{
+              margin: 0,
+              borderRadius: 0,
+              fontSize: '0.82rem',
+              padding: '1.1rem 1rem',
+              background: isDarkMode() ? '#1e1e1e' : '#fafafa',
+            }}
+            showLineNumbers
+            wrapLongLines={false}
+          >
+            {codeString}
+          </SyntaxHighlighter>
+        </div>
+      )
+    }
+
+    // Inline code
     return (
       <code
         className={cn(
           'px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800/50 text-emerald-600 dark:text-emerald-400 font-mono text-[0.875em] border border-zinc-200 dark:border-zinc-700/50',
           className
         )}
+        {...props}
       >
         {children}
       </code>
     )
   },
+  // pre is now handled by the code component wrapping it, but we keep a fallback
   pre: ({ children }) => (
-    <pre className='bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 my-4 overflow-x-auto text-zinc-800 dark:text-zinc-200 text-sm font-mono leading-relaxed shadow-sm [&>code]:!bg-transparent [&>code]:!border-none [&>code]:!p-0 [&>code]:!text-inherit [&>code]:!block'>
+    <pre className='relative bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 my-4 overflow-x-auto text-zinc-800 dark:text-zinc-200 text-sm font-mono leading-relaxed shadow-sm [&>code]:!bg-transparent [&>code]:!border-none [&>code]:!p-0 [&>code]:!text-inherit [&>code]:!block'>
       {children}
     </pre>
   ),
@@ -310,7 +653,194 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
       className='mr-2 accent-emerald-500 cursor-default'
     />
   ),
+  // Footnotes section
+  section: ({ children, className, ...props }: any) => {
+    if (className?.includes('footnotes')) {
+      return (
+        <section
+          className='mt-10 pt-6 border-t border-zinc-200 dark:border-zinc-700 text-sm text-zinc-500 dark:text-zinc-400'
+          {...props}
+        >
+          <p className='text-xs font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mb-3'>
+            Footnotes
+          </p>
+          {children}
+        </section>
+      )
+    }
+    return (
+      <section className={className} {...props}>
+        {children}
+      </section>
+    )
+  },
+})
+
+// ─── Rehype sanitize schema allowing math & slug attrs ───────────────────────
+
+const rehypeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    '*': [
+      ...(defaultSchema.attributes?.['*'] ?? []),
+      'className',
+      'class',
+      'id',
+      'style',
+      'align',
+      'width',
+      'height',
+    ],
+    div: [
+      ...(defaultSchema.attributes?.div ?? []),
+      'className',
+      'class',
+      'style',
+      'align',
+    ],
+    span: [
+      ...(defaultSchema.attributes?.span ?? []),
+      'className',
+      'class',
+      'style',
+      'aria-hidden',
+    ],
+    a: [
+      ...(defaultSchema.attributes?.a ?? []),
+      'target',
+      'rel',
+      'className',
+      'class',
+      'style',
+    ],
+    img: [
+      ...(defaultSchema.attributes?.img ?? []),
+      'src',
+      'alt',
+      'title',
+      'width',
+      'height',
+      'className',
+      'class',
+      'style',
+    ],
+    table: [
+      ...(defaultSchema.attributes?.table ?? []),
+      'className',
+      'class',
+      'style',
+      'align',
+    ],
+    td: [
+      ...(defaultSchema.attributes?.td ?? []),
+      'colSpan',
+      'rowSpan',
+      'align',
+      'style',
+    ],
+    th: [
+      ...(defaultSchema.attributes?.th ?? []),
+      'colSpan',
+      'rowSpan',
+      'align',
+      'style',
+    ],
+    details: [...(defaultSchema.attributes?.details ?? []), 'open'],
+    math: ['className', 'style'],
+    'math-inline': ['className', 'style'],
+    'math-display': ['className', 'style'],
+    annotation: ['encoding'],
+    semantics: [],
+    mrow: [],
+    mi: ['mathvariant'],
+    mo: [],
+    mn: [],
+    msup: [],
+    msub: [],
+    mfrac: ['linethickness'],
+    mspace: ['width', 'height', 'depth'],
+    svg: [
+      'viewBox',
+      'xmlns',
+      'width',
+      'height',
+      'role',
+      'focusable',
+      'aria-hidden',
+    ],
+    path: [
+      'd',
+      'fill',
+      'stroke',
+      'strokeWidth',
+      'strokeLinecap',
+      'strokeLinejoin',
+    ],
+    g: ['transform', 'fill', 'stroke'],
+    use: ['href', 'x', 'y'],
+    defs: [],
+    symbol: ['id', 'viewBox'],
+  },
+  tagNames: [
+    ...(defaultSchema.tagNames ?? []),
+    // Common HTML often written inline in markdown
+    'div',
+    'span',
+    'section',
+    'article',
+    'aside',
+    'header',
+    'footer',
+    'main',
+    'nav',
+    'figure',
+    'figcaption',
+    'details',
+    'summary',
+    'mark',
+    'kbd',
+    'sub',
+    'sup',
+    'abbr',
+    'cite',
+    'q',
+    'time',
+    'video',
+    'audio',
+    'source',
+    // KaTeX / SVG
+    'math',
+    'annotation',
+    'semantics',
+    'mrow',
+    'mi',
+    'mo',
+    'mn',
+    'msup',
+    'msub',
+    'mfrac',
+    'mspace',
+    'svg',
+    'path',
+    'g',
+    'use',
+    'defs',
+    'symbol',
+  ],
 }
+
+// ─── Props ───────────────────────────────────────────────────────────────────
+
+interface MarkdownEditorProps {
+  content: string
+  onChange: (value: string) => void
+  readOnly?: boolean
+  onFileDrop?: (file: File) => Promise<void>
+  slug?: string | null
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function MarkdownEditor({
   content,
@@ -322,6 +852,7 @@ export default function MarkdownEditor({
   const [leftWidth, setLeftWidth] = useState(50)
   const [isDragging, setIsDragging] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [showToc, setShowToc] = useState(false)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const previewRef = React.useRef<HTMLDivElement>(null)
@@ -329,7 +860,23 @@ export default function MarkdownEditor({
 
   const debouncedContent = useDebounce(content, 150)
 
-  // Scroll sync: textarea → preview
+  // Parse front-matter, stripping it from the rendered body
+  const { frontMatter, markdownBody } = useMemo(() => {
+    try {
+      const parsed = matter(debouncedContent)
+      return { frontMatter: parsed.data, markdownBody: parsed.content }
+    } catch {
+      return { frontMatter: {}, markdownBody: debouncedContent }
+    }
+  }, [debouncedContent])
+
+  // Table of Contents items
+  const tocItems = useMemo(() => extractToc(markdownBody), [markdownBody])
+
+  // Pre-build md components (stable ref avoids re-creating components on every render)
+  const mdComponents = useMemo(() => buildMdComponents(), [])
+
+  // ── Scroll sync ────────────────────────────────────────────────────────────
   const onTextareaScroll = React.useCallback(() => {
     if (isSyncing.current || !textareaRef.current || !previewRef.current) return
     isSyncing.current = true
@@ -342,7 +889,6 @@ export default function MarkdownEditor({
     })
   }, [])
 
-  // Scroll sync: preview → textarea
   const onPreviewScroll = React.useCallback(() => {
     if (isSyncing.current || !textareaRef.current || !previewRef.current) return
     isSyncing.current = true
@@ -355,13 +901,12 @@ export default function MarkdownEditor({
     })
   }, [])
 
+  // ── Resizing ───────────────────────────────────────────────────────────────
   const startResizing = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     setIsDragging(true)
   }, [])
-
   const stopResizing = React.useCallback(() => setIsDragging(false), [])
-
   const resize = React.useCallback(
     (e: MouseEvent) => {
       if (isDragging && containerRef.current) {
@@ -372,32 +917,6 @@ export default function MarkdownEditor({
     },
     [isDragging]
   )
-
-  const handleDragOver = (e: React.DragEvent) => {
-    if (readOnly) return
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragOver(true)
-  }
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    if (readOnly) return
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragOver(false)
-  }
-
-  const handleDrop = async (e: React.DragEvent) => {
-    if (readOnly) return
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragOver(false)
-
-    const file = e.dataTransfer.files?.[0]
-    if (file && onFileDrop) {
-      await onFileDrop(file)
-    }
-  }
 
   useEffect(() => {
     if (isDragging) {
@@ -416,13 +935,36 @@ export default function MarkdownEditor({
     }
   }, [isDragging, resize, stopResizing])
 
+  // ── Drag & Drop ────────────────────────────────────────────────────────────
+  const handleDragOver = (e: React.DragEvent) => {
+    if (readOnly) return
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(true)
+  }
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (readOnly) return
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+  }
+  const handleDrop = async (e: React.DragEvent) => {
+    if (readOnly) return
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file && onFileDrop) await onFileDrop(file)
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div
       ref={containerRef}
       className='flex h-full w-full overflow-hidden bg-white dark:bg-[#050505] flex-col md:flex-row relative'
       style={{ '--editor-left-width': `${leftWidth}%` } as React.CSSProperties}
     >
-      {/* Left Pane — Raw Editor */}
+      {/* ── Left Pane — Raw Editor ─────────────────────────────────────── */}
       <div
         className={cn(
           'w-full md:w-[var(--editor-left-width)] min-w-[200px] border-r border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col relative transition-colors duration-200',
@@ -478,30 +1020,47 @@ export default function MarkdownEditor({
           onScroll={onTextareaScroll}
           readOnly={readOnly}
           placeholder={
-            '# Hello!\n\nStart writing markdown...\n\n- Use **bold**, *italic*\n- Add `code` blocks\n- Create tables, lists & more'
+            '# Hello!\n\nStart writing markdown...\n\n- Use **bold**, *italic*\n- Add `code` blocks\n- Create tables, lists & more\n- Write $math$ or $$LaTeX$$\n- Draw ```mermaid diagrams```'
           }
           spellCheck={false}
         />
       </div>
 
-      {/* Drag Handle */}
+      {/* ── Drag Handle ───────────────────────────────────────────────── */}
       <div
         className='hidden md:flex w-[6px] bg-transparent hover:bg-emerald-500/30 dark:hover:bg-emerald-500/20 cursor-col-resize z-40 items-center justify-center transition-colors shrink-0'
         onMouseDown={startResizing}
       />
 
-      {/* Right Pane — Preview */}
-      <div className='flex-1 overflow-hidden bg-white dark:bg-[#0a0a0a] min-w-[200px] flex flex-col'>
+      {/* ── Right Pane — Preview ──────────────────────────────────────── */}
+      <div className='flex-1 overflow-hidden bg-white dark:bg-[#0a0a0a] min-w-[200px] flex flex-col relative'>
         <div className='flex items-center px-4 py-1 bg-gradient-to-b from-gray-50 to-gray-100 dark:from-zinc-800 dark:to-zinc-900 border-b border-zinc-300 dark:border-zinc-700 h-11 shrink-0 gap-2'>
           <span className='text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider'>
             Preview
           </span>
           <div className='flex-1' />
+
+          {/* Table of Contents toggle */}
+          {tocItems.length > 0 && (
+            <button
+              onClick={() => setShowToc((v) => !v)}
+              title='Table of Contents'
+              className={cn(
+                'flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-colors',
+                showToc
+                  ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50'
+              )}
+            >
+              <List size={14} />
+              <span className='sr-only md:not-sr-only'>ToC</span>
+            </button>
+          )}
+
           <button
             onClick={() => {
-              if (slug && previewRef.current) {
+              if (slug && previewRef.current)
                 handlePdfDownload(previewRef.current, 'document.pdf')
-              }
             }}
             disabled={!slug}
             title={
@@ -521,9 +1080,8 @@ export default function MarkdownEditor({
           </button>
           <button
             onClick={() => {
-              if (slug && previewRef.current) {
+              if (slug && previewRef.current)
                 handleDocDownload(previewRef.current.innerHTML, 'document.doc')
-              }
             }}
             disabled={!slug}
             title={
@@ -542,26 +1100,46 @@ export default function MarkdownEditor({
             <span className='sr-only md:not-sr-only'>DOC</span>
           </button>
         </div>
-        <div
-          ref={previewRef}
-          className='flex-1 p-8 overflow-y-auto'
-          onScroll={onPreviewScroll}
-        >
-          {debouncedContent.trim() ? (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeSanitize]}
-              components={mdComponents}
-            >
-              {debouncedContent}
-            </ReactMarkdown>
-          ) : (
-            <div className='h-full flex items-center justify-center'>
-              <p className='text-zinc-400 dark:text-zinc-600 text-sm italic'>
-                Preview will appear here as you type...
-              </p>
-            </div>
+
+        {/* Preview body + ToC overlay */}
+        <div className='relative flex-1 overflow-hidden'>
+          {showToc && (
+            <TableOfContents
+              items={tocItems}
+              onClose={() => setShowToc(false)}
+            />
           )}
+          <div
+            ref={previewRef}
+            className='h-full p-8 overflow-y-auto'
+            onScroll={onPreviewScroll}
+          >
+            {debouncedContent.trim() ? (
+              <>
+                <FrontMatterBanner data={frontMatter} />
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[
+                    // Parse raw HTML in markdown, then sanitize (keeps XSS-safe tags)
+                    rehypeRaw,
+                    [rehypeSanitize, rehypeSchema],
+                    // Run after sanitize so KaTeX/slug output is trusted & ToC ids stay intact
+                    rehypeKatex,
+                    rehypeSlug,
+                  ]}
+                  components={mdComponents}
+                >
+                  {markdownBody}
+                </ReactMarkdown>
+              </>
+            ) : (
+              <div className='h-full flex items-center justify-center'>
+                <p className='text-zinc-400 dark:text-zinc-600 text-sm italic'>
+                  Preview will appear here as you type...
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
