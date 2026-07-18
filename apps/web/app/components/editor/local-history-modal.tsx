@@ -6,6 +6,7 @@ import {
   Braces,
   Clock3,
   File,
+  FileCode,
   FileText,
   FolderOpen,
   Search,
@@ -13,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import React from 'react'
+import { JsonRockLoader } from '../Loader'
 
 interface LocalHistoryModalProps {
   isOpen: boolean
@@ -40,6 +42,7 @@ function formatUpdatedAt(timestamp: number): string {
 function iconForType(type: LocalDocumentRecord['type']) {
   if (type === 'text') return <File size={14} />
   if (type === 'markdown') return <FileText size={14} />
+  if (type === 'html') return <FileCode size={14} />
   return <Braces size={14} />
 }
 
@@ -131,8 +134,10 @@ export default function LocalHistoryModal({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder='Search by slug, title, or content preview'
+              disabled={isLoading}
               className={cn(
                 'w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 py-2 text-sm text-zinc-900 outline-none focus:ring-1 focus:ring-emerald-500/40',
+                isLoading && 'opacity-60 cursor-not-allowed',
                 !forceLightMode &&
                   'dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100'
               )}
@@ -141,13 +146,14 @@ export default function LocalHistoryModal({
 
           <button
             onClick={() => onClearAll()}
-            disabled={documents.length === 0}
+            disabled={isLoading || documents.length === 0}
             className={cn(
               'inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors',
-              documents.length === 0
+              isLoading || documents.length === 0
                 ? 'cursor-not-allowed text-zinc-400 border-zinc-200 bg-zinc-100'
                 : 'text-red-600 border-red-200 bg-red-50 hover:bg-red-100 hover:cursor-pointer',
               !forceLightMode &&
+                !isLoading &&
                 documents.length > 0 &&
                 'dark:text-red-400 dark:border-red-900/50 dark:bg-red-950/30 dark:hover:bg-red-950/50'
             )}
@@ -162,10 +168,12 @@ export default function LocalHistoryModal({
             'rounded-lg border border-zinc-200 overflow-y-auto min-h-[260px] max-h-[58vh] bg-white',
             !forceLightMode && 'dark:border-zinc-800 dark:bg-zinc-950'
           )}
+          aria-busy={isLoading}
         >
           {isLoading ? (
-            <div className='h-full min-h-[260px] flex items-center justify-center text-sm text-zinc-500'>
-              Loading local files...
+            <div className='h-full min-h-[260px] flex flex-col items-center justify-center gap-3 text-sm text-zinc-500'>
+              <JsonRockLoader className='w-10 h-10' />
+              <span>Loading local history…</span>
             </div>
           ) : filteredDocuments.length === 0 ? (
             <div className='h-full min-h-[260px] flex flex-col items-center justify-center text-center px-4'>
@@ -186,12 +194,23 @@ export default function LocalHistoryModal({
                 return (
                   <div
                     key={doc.slug}
+                    role='button'
+                    tabIndex={0}
+                    onClick={() => onOpenDocument(doc)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onOpenDocument(doc)
+                      }
+                    }}
                     className={cn(
-                      'px-4 py-3 flex flex-col gap-2 transition-colors',
+                      'px-4 py-3 flex flex-col gap-2 transition-colors cursor-pointer outline-none',
+                      'focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500',
                       isActive
                         ? 'bg-emerald-50 dark:bg-emerald-950/20'
                         : 'hover:bg-zinc-50 dark:hover:bg-zinc-900/70'
                     )}
+                    aria-label={`Open ${doc.title || doc.slug}`}
                   >
                     <div className='flex items-center justify-between gap-3'>
                       <div className='min-w-0'>
@@ -203,13 +222,18 @@ export default function LocalHistoryModal({
                                 ? 'text-cyan-700 border-cyan-200 bg-cyan-50'
                                 : doc.type === 'markdown'
                                   ? 'text-indigo-700 border-indigo-200 bg-indigo-50'
-                                  : 'text-orange-700 border-orange-200 bg-orange-50',
+                                  : doc.type === 'html'
+                                    ? 'text-violet-700 border-violet-200 bg-violet-50'
+                                    : 'text-orange-700 border-orange-200 bg-orange-50',
                               !forceLightMode &&
                                 doc.type === 'json' &&
                                 'dark:text-cyan-400 dark:border-cyan-900/50 dark:bg-cyan-950/30',
                               !forceLightMode &&
                                 doc.type === 'markdown' &&
                                 'dark:text-indigo-400 dark:border-indigo-900/50 dark:bg-indigo-950/30',
+                              !forceLightMode &&
+                                doc.type === 'html' &&
+                                'dark:text-violet-400 dark:border-violet-900/50 dark:bg-violet-950/30',
                               !forceLightMode &&
                                 doc.type === 'text' &&
                                 'dark:text-orange-400 dark:border-orange-900/50 dark:bg-orange-950/30'
@@ -251,13 +275,21 @@ export default function LocalHistoryModal({
 
                       <div className='flex items-center gap-2 shrink-0'>
                         <button
-                          onClick={() => onOpenDocument(doc)}
+                          type='button'
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onOpenDocument(doc)
+                          }}
                           className='px-2.5 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500 transition-colors hover:cursor-pointer'
                         >
                           Open
                         </button>
                         <button
-                          onClick={() => onDeleteDocument(doc.slug)}
+                          type='button'
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onDeleteDocument(doc.slug)
+                          }}
                           className='p-1.5 rounded-md text-zinc-500 hover:bg-red-50 hover:text-red-600 transition-colors dark:hover:bg-red-950/30 hover:cursor-pointer'
                           aria-label='Delete local document'
                         >
