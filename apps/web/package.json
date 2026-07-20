@@ -35,6 +35,7 @@
     "@types/js-cookie": "^3.0.6",
     "@uiw/react-color": "^2.9.6",
     "clsx": "^2.1.1",
+    "dompurify": "^3.4.12",
     "elkjs": "^0.11.0",
     "framer-motion": "^12.31.0",
     "gray-matter": "^4.0.3",
@@ -47,6 +48,7 @@
     "mongodb": "^6.11.0",
     "next": "16.1.1",
     "next-themes": "^0.4.6",
+    "prettier": "^3.7.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-icons": "^5.5.0",
@@ -65,6 +67,7 @@
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "^4",
+    "@types/dompurify": "^3.2.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

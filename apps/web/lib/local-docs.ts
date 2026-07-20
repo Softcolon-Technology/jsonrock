@@ -1,4 +1,4 @@
-export type LocalDocumentType = 'json' | 'text' | 'markdown'
+export type LocalDocumentType = 'json' | 'text' | 'markdown' | 'html'
 
 export type LocalDocumentMode = 'visualize' | 'tree' | 'formatter'
 
@@ -33,6 +33,7 @@ const DEFAULT_TITLE: Record<LocalDocumentType, string> = {
   json: 'Untitled JSON',
   text: 'Untitled Text',
   markdown: 'Untitled Markdown',
+  html: 'Untitled HTML',
 }
 
 function isIndexedDbAvailable(): boolean {
@@ -156,6 +157,12 @@ function deriveTitle(content: string, type: LocalDocumentType): string {
 
   if (type === 'markdown') {
     return firstLine.replace(/^#+\s*/, '').slice(0, 60) || DEFAULT_TITLE[type]
+  }
+
+  if (type === 'html') {
+    const titleMatch = content.match(/<title[^>]*>([^<]*)<\/title>/i)
+    if (titleMatch?.[1]?.trim()) return titleMatch[1].trim().slice(0, 60)
+    return firstLine.replace(/<[^>]+>/g, '').slice(0, 60) || DEFAULT_TITLE[type]
   }
 
   // ── Text / fallback ──

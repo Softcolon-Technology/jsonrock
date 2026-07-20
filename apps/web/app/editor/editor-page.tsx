@@ -39,7 +39,7 @@ import { cn } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
 import dynamic from 'next/dynamic'
 import EditorHeader from '../components/editor/editor-header'
-import { ShareType } from '../iterface'
+import { ShareType, getEditorBasePath } from '../iterface'
 import {
   clearLocalDocuments,
   deleteLocalDocumentBySlug,
@@ -56,6 +56,49 @@ const RichTextEditor = dynamic(() => import('../components/RichTextEditor'), {
 const MarkdownEditor = dynamic(() => import('../components/MarkdownEditor'), {
   ssr: false,
 })
+
+const HtmlEditor = dynamic(() => import('../components/HtmlEditor'), {
+  ssr: false,
+})
+
+const DEFAULT_HTML_CONTENT = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HTML Preview</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 2rem;
+      line-height: 1.5;
+      color: #18181b;
+      background: #fff;
+    }
+    h1 { margin-top: 0; }
+    .row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+    button {
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #d4d4d8;
+      border-radius: 0.375rem;
+      background: #f4f4f5;
+      cursor: pointer;
+    }
+    button:hover { background: #e4e4e7; }
+  </style>
+</head>
+<body>
+  <h1>Hello HTML</h1>
+  <p>Turn <strong>Safe Mode</strong> off to run scripts, then try these:</p>
+  <div class="row">
+    <button onclick="console.log('hello from log')">console.log</button>
+    <button onclick="console.warn('hello from warn')">console.warn</button>
+    <button onclick="console.error('hello from error')">console.error</button>
+    <button onclick="notDefined()">throw ReferenceError</button>
+  </div>
+</body>
+</html>`
 
 export type JsonShareMode = 'visualize' | 'tree' | 'formatter'
 
@@ -110,7 +153,9 @@ export default function Home({
         ? ''
         : effectiveFeatureMode === 'markdown'
           ? '# Hello Markdown\n\nStart typing...'
-          : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+          : effectiveFeatureMode === 'html'
+            ? DEFAULT_HTML_CONTENT
+            : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
   )
 
   const lastPersistedContentRef = React.useRef<string>(
@@ -390,7 +435,9 @@ export default function Home({
           ? ''
           : featureMode === 'markdown'
             ? '# Hello Markdown\n\nStart typing...'
-            : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+            : featureMode === 'html'
+              ? DEFAULT_HTML_CONTENT
+              : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
 
       // Reset the state to an empty un-saved document canvas
       setCurrentJsonContent(defaultContent)
@@ -398,7 +445,11 @@ export default function Home({
       setIsDocumentPrivate(false)
       setUserAccessLevel('viewer')
       setDocumentType(featureMode)
-      if (featureMode !== 'text' && featureMode !== 'markdown') {
+      if (
+        featureMode !== 'text' &&
+        featureMode !== 'markdown' &&
+        featureMode !== 'html'
+      ) {
         setCurrentViewMode(paramView || 'visualize')
       }
       setIsCurrentUserOwner(true)
@@ -561,27 +612,16 @@ export default function Home({
     setAlertState((prev) => ({ ...prev, isOpen: false }))
   }
 
-  const loadLocalHistory = useCallback(async () => {
+  const openHistoryModal = useCallback(() => {
+    // Show loader on the first paint — don't flash stale IndexedDB results
     setIsHistoryLoading(true)
-    try {
-      const records = await listLocalDocuments()
-      setLocalDocuments(records)
-    } catch (error) {
-      console.error('Failed to load local history', error)
-    } finally {
-      setIsHistoryLoading(false)
-    }
+    setLocalDocuments([])
+    setIsHistoryModalOpen(true)
   }, [])
 
   const getRouteForDocument = useCallback(
     (type: ShareType, slug: string, mode?: JsonShareMode) => {
-      const basePath =
-        type === 'text'
-          ? '/editor/text/'
-          : type === 'markdown'
-            ? '/editor/markdown/'
-            : '/editor/'
-
+      const basePath = `${getEditorBasePath(type)}/`
       const viewParam = type === 'json' ? `?view=${mode || 'visualize'}` : ''
       return `${basePath}${slug}${viewParam}`
     },
@@ -623,14 +663,29 @@ export default function Home({
   }, [])
 
   useEffect(() => {
-    loadLocalHistory()
-  }, [loadLocalHistory])
+    if (!isHistoryModalOpen) return
 
-  useEffect(() => {
-    if (isHistoryModalOpen) {
-      loadLocalHistory()
+    let cancelled = false
+
+    const load = async () => {
+      setIsHistoryLoading(true)
+      try {
+        const records = await listLocalDocuments()
+        if (!cancelled) setLocalDocuments(records)
+      } catch (error) {
+        console.error('Failed to load local history', error)
+        if (!cancelled) setLocalDocuments([])
+      } finally {
+        if (!cancelled) setIsHistoryLoading(false)
+      }
     }
-  }, [isHistoryModalOpen, loadLocalHistory])
+
+    void load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isHistoryModalOpen])
 
   const debouncedContentForLocalStorage = useDebounce(currentJsonContent, 800)
 
@@ -729,11 +784,14 @@ export default function Home({
       typeof specificType === 'string' ? specificType : documentType
     const isText = targetType === 'text'
     const isMarkdown = targetType === 'markdown'
+    const isHtml = targetType === 'html'
     const initialContent = isText
       ? '<p style="font-size: 14pt">Type your text here...</p>'
       : isMarkdown
         ? '# Hello Markdown\n\nStart typing...'
-        : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+        : isHtml
+          ? DEFAULT_HTML_CONTENT
+          : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
 
     setCurrentJsonContent(initialContent)
     setDocumentSlug(null)
@@ -748,7 +806,7 @@ export default function Home({
     })
 
     // Set view mode to formatter for JSON documents
-    if (!isText && !isMarkdown) {
+    if (!isText && !isMarkdown && !isHtml) {
       setCurrentViewMode('formatter')
     }
 
@@ -760,7 +818,7 @@ export default function Home({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           json: initialContent,
-          mode: isText || isMarkdown ? currentViewMode : 'formatter', // Use formatter for new JSON
+          mode: isText || isMarkdown || isHtml ? currentViewMode : 'formatter',
           type: targetType,
           accessType: 'editor',
         }),
@@ -774,14 +832,12 @@ export default function Home({
         setDocumentType(data.type || targetType)
         addOwnership(data.slug)
 
-        const route =
-          (data.type || targetType) === 'text'
-            ? '/editor/text/'
-            : (data.type || targetType) === 'markdown'
-              ? '/editor/markdown/'
-              : '/editor/'
+        const resolvedType = (data.type || targetType) as ShareType
+        const route = `${getEditorBasePath(resolvedType)}/`
         const viewParam =
-          targetType === 'text' || targetType === 'markdown'
+          resolvedType === 'text' ||
+          resolvedType === 'markdown' ||
+          resolvedType === 'html'
             ? ''
             : '?view=formatter'
         const newUrl = `${route}${data.slug}${viewParam}`
@@ -1099,14 +1155,11 @@ export default function Home({
         setDocumentSlug(newSlug)
         addOwnership(newSlug) // Mark as owner of new/updated slug
 
-        const route =
-          documentType === 'text'
-            ? '/editor/text/'
-            : documentType === 'markdown'
-              ? '/editor/markdown/'
-              : '/editor/'
+        const route = `${getEditorBasePath(documentType)}/`
         const viewParam =
-          documentType === 'text' || documentType === 'markdown'
+          documentType === 'text' ||
+          documentType === 'markdown' ||
+          documentType === 'html'
             ? ''
             : `?view=${currentViewMode}`
         const newUrl = `${route}${newSlug}${viewParam}`
@@ -1126,7 +1179,7 @@ export default function Home({
       if (settings.sharePassword) setDocumentPassword(settings.sharePassword)
 
       // Copy Link
-      const route = documentType === 'text' ? '/editor/text/' : '/editor/'
+      const route = `${getEditorBasePath(documentType)}/`
       const link = `${window.location.origin}${route}${newSlug}`
       let message = 'Settings saved and link copied to clipboard!'
       try {
@@ -1163,7 +1216,11 @@ export default function Home({
       return
     }
 
-    if (documentType === 'text') {
+    if (
+      documentType === 'text' ||
+      documentType === 'markdown' ||
+      documentType === 'html'
+    ) {
       setIsJsonValid(true)
       setJsonValidationError(null)
       return
@@ -1261,7 +1318,8 @@ export default function Home({
     if (
       (documentType === 'text' ||
         documentType === 'json' ||
-        documentType === 'markdown') &&
+        documentType === 'markdown' ||
+        documentType === 'html') &&
       documentSlug &&
       hasEditPermission &&
       !isPasswordLocked &&
@@ -1318,15 +1376,12 @@ export default function Home({
             addOwnership(data.slug)
             lastPersistedContentRef.current = debouncedContentForAutoSave
 
-            const resolvedType = data.type || documentType
-            const route =
-              resolvedType === 'text'
-                ? '/editor/text/'
-                : resolvedType === 'markdown'
-                  ? '/editor/markdown/'
-                  : '/editor/'
+            const resolvedType = (data.type || documentType) as ShareType
+            const route = `${getEditorBasePath(resolvedType)}/`
             const viewParam =
-              resolvedType === 'text' || resolvedType === 'markdown'
+              resolvedType === 'text' ||
+              resolvedType === 'markdown' ||
+              resolvedType === 'html'
                 ? ''
                 : `?view=${currentViewMode}`
             const newUrl = `${route}${data.slug}${viewParam}`
@@ -1421,7 +1476,7 @@ export default function Home({
           onCreateNewDocument={handleCreateNewDocument}
           isAutoSaving={isAutoSaving}
           onOpenShareModal={setIsShareModalOpen}
-          onOpenHistoryModal={setIsHistoryModalOpen}
+          onOpenHistoryModal={openHistoryModal}
           currentViewMode={currentViewMode}
         />
 
@@ -1435,7 +1490,7 @@ export default function Home({
               } as React.CSSProperties
             }
             className={cn(
-              'border-b lg:border-b-0 lg:border-r border-zinc-200 flex flex-col bg-white h-full',
+              'border-b lg:border-b-0 lg:border-r border-zinc-200 flex flex-col bg-white h-full min-h-0',
               documentType === 'json' &&
                 'dark:border-zinc-900 dark:bg-[#09090b]',
               documentType !== 'json'
@@ -1465,6 +1520,15 @@ export default function Home({
                   onChange={onJsonContentChange}
                   readOnly={!hasEditPermission}
                   onFileDrop={processSelectedFile}
+                  slug={documentSlug}
+                />
+              </div>
+            ) : documentType === 'html' ? (
+              <div className='flex-1 min-h-0 h-full relative overflow-hidden'>
+                <HtmlEditor
+                  content={currentJsonContent}
+                  onChange={onJsonContentChange}
+                  readOnly={!hasEditPermission}
                   slug={documentSlug}
                 />
               </div>

@@ -1,7 +1,14 @@
 'use client'
 
 import { cn } from '@/lib/utils'
-import { GitCompareArrows, Braces, File, FileText, Home } from 'lucide-react'
+import {
+  GitCompareArrows,
+  Braces,
+  Code2,
+  File,
+  FileText,
+  Home,
+} from 'lucide-react'
 import { ThemeToggle } from '../components/button/theme-toggle'
 import HeaderLogo from '../components/editor/header/header-logo'
 import EditorActionBtn from '../components/button/editor-action-btn'
@@ -63,6 +70,15 @@ const DiffHeader = ({ isSaving }: DiffHeaderProps) => {
           label='New Markdown'
           title='Create New Markdown'
           icon={<FileText size={14} />}
+        />
+
+        {/* New HTML */}
+        <EditorActionBtn
+          href='/editor/html'
+          documentType='json'
+          label='New HTML'
+          title='Create New HTML Viewer'
+          icon={<Code2 size={14} />}
         />
 
         {/* Diff Checker (Active) */}

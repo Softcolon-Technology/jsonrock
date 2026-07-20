@@ -17,7 +17,9 @@ const HeaderLogo = ({ type, slug, isValid, viewMode }: Props) => {
       ? `/editor/text/${slug}`
       : type === 'markdown'
         ? `/editor/markdown/${slug}`
-        : `/editor/${slug}?view=${viewMode}`
+        : type === 'html'
+          ? `/editor/html/${slug}`
+          : `/editor/${slug}?view=${viewMode}`
     : `?view=${viewMode}`
 
   const handleLogoClick = () => {
