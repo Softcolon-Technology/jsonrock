@@ -13,4 +13,5 @@ export enum ShareTypeEnum {
   JSON = 'json',
   TEXT = 'text',
   MARKDOWN = 'markdown',
+  HTML = 'html',
 }
