@@ -1144,6 +1144,16 @@ const RichTextEditor = ({
     left: number
   } | null>(null)
 
+  // Detect Mac platform once and mark body for CSS tooltip (Cmd vs Ctrl)
+  React.useEffect(() => {
+    const isMac =
+      (navigator as any).userAgentData?.platform === 'macOS' ||
+      /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+    if (isMac) {
+      document.body.setAttribute('data-platform', 'mac')
+    }
+  }, [])
+
   // Listen for browser fullscreen change events
   React.useEffect(() => {
     const handleFullscreenChange = () => {
@@ -1228,7 +1238,17 @@ const RichTextEditor = ({
       Highlight.configure({
         multicolor: true,
       }),
-      TiptapLink.configure({ openOnClick: false }),
+      TiptapLink.configure({
+        autolink: true,
+        linkOnPaste: true,
+        openOnClick: false, // Prevent accidental navigation while editing; Ctrl/Cmd+Click opens the link
+        defaultProtocol: 'https',
+        HTMLAttributes: {
+          target: '_blank',
+          rel: 'noopener noreferrer nofollow',
+          class: 'tiptap-link',
+        },
+      }),
       TiptapImage,
       TabKey,
       Table.configure({
@@ -1266,6 +1286,30 @@ const RichTextEditor = ({
         ),
         style:
           'line-height: 1.6; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap; min-height: 100%; outline: none;',
+      },
+      handleClick(view, pos, event) {
+        // Find the closest anchor tag from the click target
+        const anchor = (event.target as HTMLElement).closest('a')
+        if (!anchor) return false
+
+        const href = anchor.getAttribute('href')
+        if (!href) return false
+
+        if (view.editable) {
+          // In edit mode: require Ctrl (Windows/Linux) or Cmd (Mac) to open link
+          if (event.ctrlKey || event.metaKey) {
+            event.preventDefault()
+            window.open(href, '_blank', 'noopener,noreferrer')
+            return true
+          }
+          // Plain click in edit mode — do nothing (let selection happen)
+          return false
+        } else {
+          // In readOnly/view mode: any click opens the link
+          event.preventDefault()
+          window.open(href, '_blank', 'noopener,noreferrer')
+          return true
+        }
       },
     },
     onUpdate: ({ editor }) => {
