@@ -1,6 +1,14 @@
+import type { Metadata } from 'next'
 import { Suspense } from 'react'
 import EditorPage from '../../editor-page'
 import { FullScreenLoader } from '../../../components/Loader'
+
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+}
 
 interface Props {
   params: Promise<{ slug: string }>

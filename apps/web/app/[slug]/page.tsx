@@ -1,52 +1,60 @@
-import { redirect } from "next/navigation";
+import type { Metadata } from 'next'
+import { redirect } from 'next/navigation'
+
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+}
 
 interface Props {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ slug: string }>
 }
 
 export default async function RedirectToTextChat({ params }: Props) {
-  const { slug } = await params;
+  const { slug } = await params
 
   try {
     // Check if slug exists
     const checkRes = await fetch(
       `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/share/${slug}`,
       {
-        cache: "no-store",
-      },
-    );
+        cache: 'no-store',
+      }
+    )
 
     if (!checkRes.ok) {
       // Slug doesn't exist, create it via API
       const createRes = await fetch(
         `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/share`,
         {
-          method: "POST",
+          method: 'POST',
           headers: {
-            "Content-Type": "application/json",
+            'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             slug: slug,
-            type: "text",
-            json: "",
-            mode: "visualize",
+            type: 'text',
+            json: '',
+            mode: 'visualize',
             isPrivate: false,
-            accessType: "editor",
+            accessType: 'editor',
           }),
-          cache: "no-store",
-        },
-      );
+          cache: 'no-store',
+        }
+      )
 
       if (!createRes.ok) {
-        console.error("Failed to create slug:", await createRes.text());
+        console.error('Failed to create slug:', await createRes.text())
         // Still redirect even if creation failed - the /editor/text/[slug] page will handle it
       }
     }
   } catch (error) {
-    console.error("Error in slug auto-creation:", error);
+    console.error('Error in slug auto-creation:', error)
     // Continue to redirect even on error
   }
 
   // Redirect to the text editor page
-  redirect(`/editor/text/${slug}`);
+  redirect(`/editor/text/${slug}`)
 }
