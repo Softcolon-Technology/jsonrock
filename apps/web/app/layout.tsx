@@ -62,6 +62,47 @@ export default function RootLayout({
               </Script>
             </>
           )}
+          <script
+            type='application/ld+json'
+            dangerouslySetInnerHTML={{
+              __html: JSON.stringify({
+                '@context': 'https://schema.org',
+                '@type': 'WebApplication',
+                name: 'JsonRock',
+                url: 'https://jsonrock.com',
+                description:
+                  'Visualize, format, validate and share JSON data instantly with graph view, tree view, and secure sharing.',
+                applicationCategory: 'DeveloperApplication',
+                operatingSystem: 'Any',
+                offers: {
+                  '@type': 'Offer',
+                  price: '0',
+                  priceCurrency: 'USD',
+                },
+                creator: {
+                  '@type': 'Organization',
+                  name: 'Softcolon',
+                  url: 'https://www.softcolon.com',
+                },
+              }),
+            }}
+          />
+          <script
+            type='application/ld+json'
+            dangerouslySetInnerHTML={{
+              __html: JSON.stringify({
+                '@context': 'https://schema.org',
+                '@type': 'Organization',
+                name: 'Softcolon',
+                url: 'https://www.softcolon.com',
+                logo: 'https://jsonrock.com/jsonrock-dark.svg',
+                sameAs: [
+                  'https://www.instagram.com/softcolon/',
+                  'https://www.linkedin.com/company/softcolon/',
+                ],
+              }),
+            }}
+          />
           {children}
           <ScrollToTop />
         </ThemeProvider>
