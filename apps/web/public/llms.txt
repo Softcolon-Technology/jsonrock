@@ -1,0 +1,16 @@
+# JsonRock
+
+> Browser-based JSON visualizer, formatter, and validator for developers. Free, runs entirely in the browser, no signup required.
+
+## Tools
+- [JSON Formatter](https://jsonrock.com/json-formatter): Format, beautify, and minify raw JSON instantly
+- [JSON Graph Viewer](https://jsonrock.com/json-graph-viewer): Visualize nested JSON data as an interactive graph
+- [JSON Tree Explorer](https://jsonrock.com/json-tree-explorer): Browse deeply nested JSON as a collapsible tree
+- [Diff Checker](https://jsonrock.com/diff): Compare two JSON documents side by side
+- [Markdown Editor](https://jsonrock.com/editor/markdown): Write and preview Markdown with live rendering
+- [HTML Editor](https://jsonrock.com/editor/html): Preview HTML code in real time
+- [Text Editor](https://jsonrock.com/editor/text): Minimal browser-based text editor with shareable links
+
+## About
+- [Privacy Policy](https://jsonrock.com/privacy-policy)
+- [Terms of Service](https://jsonrock.com/terms)
