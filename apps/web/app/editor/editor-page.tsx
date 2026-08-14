@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
-import { Edge, Node } from 'reactflow'
+import type { Edge, Node } from 'reactflow'
 import {
   Code2,
   GitGraph,
@@ -30,9 +30,15 @@ import LocalHistoryModal from '../components/editor/local-history-modal'
 import Cookies from 'js-cookie'
 import { JsonRockLoader } from '../components/Loader'
 
-import JsonEditor from '../components/JsonEditor'
-import GraphView from '../components/GraphView'
-import TreeExplorer from '../components/TreeExplorer'
+const JsonEditor = dynamic(() => import('../components/JsonEditor'), {
+  ssr: false,
+})
+const GraphView = dynamic(() => import('../components/GraphView'), {
+  ssr: false,
+})
+const TreeExplorer = dynamic(() => import('../components/TreeExplorer'), {
+  ssr: false,
+})
 import { getLayoutedElements, applyElkLayout } from '@/lib/graph-layout'
 import { useJsonWorker, TreeNodeSlim } from '@/hooks/useJsonWorker'
 import { cn } from '@/lib/utils'
@@ -1454,13 +1460,13 @@ export default function Home({
   return (
     <div
       className={cn(
-        'flex h-[100dvh] w-screen bg-gray-50 text-zinc-800 font-sans overflow-hidden',
+        'flex h-dvh w-screen bg-gray-50 text-zinc-800 font-sans overflow-hidden',
         documentType !== 'text' &&
           'dark:bg-zinc-950 dark:text-zinc-300 relative'
       )}
     >
       {isPageLoading && !isPasswordLocked && (
-        <div className='absolute inset-0 z-[100] flex items-center justify-center pointer-events-none'>
+        <div className='absolute inset-0 z-100 flex items-center justify-center pointer-events-none'>
           <JsonRockLoader className='w-14 h-14' />
         </div>
       )}
@@ -1495,7 +1501,7 @@ export default function Home({
                 'dark:border-zinc-900 dark:bg-[#09090b]',
               documentType !== 'json'
                 ? 'w-full'
-                : 'w-full lg:w-[var(--left-panel-width)] lg:min-w-[300px]',
+                : 'w-full lg:w-(--left-panel-width) lg:min-w-75',
               // Mobile visibility toggle
               // Mobile visibility toggle
               mobileTab === 'editor' ? 'flex' : 'hidden lg:flex'
@@ -1604,7 +1610,7 @@ export default function Home({
                             </div>
                             <p
                               className={cn(
-                                'text-[11px] lg:text-xs mt-1 lg:mt-1.5 font-mono break-words leading-relaxed border-l-2 pl-2 lg:pl-3',
+                                'text-[11px] lg:text-xs mt-1 lg:mt-1.5 font-mono wrap-break-word leading-relaxed border-l-2 pl-2 lg:pl-3',
                                 effectiveValidationError.severity === 'warning'
                                   ? 'text-amber-700 dark:text-amber-400/80 border-amber-300 dark:border-amber-700/50'
                                   : 'text-zinc-600 dark:text-zinc-400 border-red-200 dark:border-red-900/50'
@@ -1651,7 +1657,7 @@ export default function Home({
             }
             className={cn(
               'bg-gray-50 dark:bg-[#050505] relative overflow-hidden h-full',
-              'w-full lg:w-[var(--right-panel-width)]',
+              'w-full lg:w-(--right-panel-width)',
               // Mobile visibility toggle
               mobileTab === 'viewer'
                 ? 'flex flex-col'
@@ -1661,7 +1667,7 @@ export default function Home({
             )}
           >
             {/* Back to Editor Button (Mobile Only) */}
-            <div className='lg:hidden absolute top-2 right-10 z-[70]'>
+            <div className='lg:hidden absolute top-2 right-10 z-70'>
               <button
                 onClick={() => setMobileTab('editor')}
                 className='flex items-center gap-2 px-3 py-1.5 bg-zinc-800 dark:bg-zinc-700 text-white rounded-full shadow-lg font-medium text-xs hover:bg-zinc-700 dark:hover:bg-zinc-600 transition-transform active:scale-95 backdrop-blur-sm opacity-90 hover:opacity-100'
@@ -1843,7 +1849,7 @@ export default function Home({
                       currentViewMode !== 'formatter' && 'hidden'
                     )}
                   >
-                    <div className='flex items-center justify-between pl-4 pr-4 py-1 bg-gradient-to-b from-gray-50 to-gray-100 dark:from-zinc-800 dark:to-zinc-900 border-b border-zinc-300 dark:border-zinc-700 h-11 shrink-0 ml-16'>
+                    <div className='flex items-center justify-between pl-4 pr-4 py-1 bg-linear-to-b from-gray-50 to-gray-100 dark:from-zinc-800 dark:to-zinc-900 border-b border-zinc-300 dark:border-zinc-700 h-11 shrink-0 ml-16'>
                       <div className='flex items-center gap-2'>
                         <span className='text-sm font-semibold text-zinc-500 dark:text-zinc-400 whitespace-nowrap'>
                           JSON Formatter

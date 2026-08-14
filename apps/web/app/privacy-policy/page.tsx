@@ -1,12 +1,20 @@
+import type { Metadata } from 'next'
 import LegalLayout from '@/components/legal-layout'
+
+export const metadata: Metadata = {
+  title: 'Privacy Policy',
+  description:
+    'Learn how JsonRock collects, uses, and protects your personal data.',
+  alternates: {
+    canonical: 'https://jsonrock.com/privacy-policy',
+  },
+}
 
 export default function PrivacyPolicy() {
   return (
     <LegalLayout title='Privacy Policy' lastUpdated='3/3/2026'>
       <section>
-        <h3>
-          <b>1. Introduction</b>
-        </h3>
+        <h2 className='text-xl font-bold mt-6'>1. Introduction</h2>
         <p>
           Welcome to JsonRock ("we," "our," or "us"). We respect your privacy
           and are committed to protecting your personal data. This privacy
@@ -16,9 +24,7 @@ export default function PrivacyPolicy() {
         </p>
         <br />
 
-        <h3>
-          <b>2. Data We Collect</b>
-        </h3>
+        <h2 className='text-xl font-bold mt-6'>2. Data We Collect</h2>
         <p>
           We may collect, use, store, and transfer different kinds of personal
           data about you which we have grouped together as follows:
@@ -47,9 +53,7 @@ export default function PrivacyPolicy() {
         </ul>
         <br />
 
-        <h3>
-          <b>3. How We Use Your Data</b>
-        </h3>
+        <h2 className='text-xl font-bold mt-6'>3. How We Use Your Data</h2>
         <p>
           We will only use your personal data when the law allows us to. Most
           commonly, we will use your personal data in the following
@@ -68,9 +72,7 @@ export default function PrivacyPolicy() {
         </ul>
         <br />
 
-        <h3>
-          <b>4. Data Security</b>
-        </h3>
+        <h2 className='text-xl font-bold mt-6'>4. Data Security</h2>
         <p>
           We have put in place appropriate security measures to prevent your
           personal data from being accidentally lost, used, or accessed in an
@@ -78,9 +80,7 @@ export default function PrivacyPolicy() {
         </p>
         <br />
 
-        <h3>
-          <b>5. Contact Us</b>
-        </h3>
+        <h2 className='text-xl font-bold mt-6'>5. Contact Us</h2>
         <p>
           If you have any questions about this privacy policy or our privacy
           practices, please contact us at:{' '}
