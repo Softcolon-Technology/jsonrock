@@ -12,6 +12,7 @@ import {
   History,
   Home,
   LinkIcon,
+  Loader2,
   MoreHorizontal,
 } from 'lucide-react'
 import { ThemeToggle } from '../button/theme-toggle'
@@ -115,7 +116,12 @@ const EditorHeader = ({
   currentViewMode,
   onOpenHistoryModal,
 }: Props) => {
-  const { isSignedIn } = useUser()
+  const { isSignedIn, isLoaded: isUserLoaded } = useUser()
+  // [AUTH-DEBUG] TEMP — remove after diagnosing stuck auth-loading
+  console.log('[AUTH-DEBUG] editor-header render', {
+    isUserLoaded,
+    isSignedIn,
+  })
   const [isPending, startTransition] = useTransition()
   const [isOtherOpen, setIsOtherOpen] = useState(false)
   const [visibleCount, setVisibleCount] = useState(HEADER_ACTIONS.length)
@@ -452,25 +458,42 @@ const EditorHeader = ({
         </button>
 
         <button
-          onClick={() => (!documentSlug ? undefined : onOpenShareModal(true))}
-          disabled={!documentSlug}
+          onClick={() => (!documentSlug || isAutoSaving ? undefined : onOpenShareModal(true))}
+          disabled={!documentSlug || isAutoSaving}
           className={cn(
             'p-2 rounded-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:outline-none',
             !documentSlug
               ? 'text-zinc-300 dark:text-zinc-600 cursor-not-allowed opacity-50'
-              : cn(
-                  'text-emerald-600 dark:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 cursor-pointer',
-                  documentType !== 'text' && 'dark:hover:text-emerald-400'
-                )
+              : isAutoSaving
+                ? 'text-emerald-600 dark:text-emerald-400 cursor-wait opacity-80'
+                : cn(
+                    'text-emerald-600 dark:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 cursor-pointer',
+                    documentType !== 'text' && 'dark:hover:text-emerald-400'
+                  )
           )}
-          title={!documentSlug ? 'Save document first to share' : 'Share Link'}
+          title={
+            !documentSlug
+              ? 'Save document first to share'
+              : isAutoSaving
+                ? 'Saving changes...'
+                : 'Share Link'
+          }
           aria-label={
             !documentSlug
               ? 'Share Link (disabled - save document first)'
-              : 'Share Link'
+              : isAutoSaving
+                ? 'Saving changes...'
+                : 'Share Link'
           }
         >
-          <LinkIcon size={18} />
+          {isAutoSaving && documentSlug ? (
+            <Loader2
+              size={18}
+              className='animate-spin text-emerald-600 dark:text-emerald-400'
+            />
+          ) : (
+            <LinkIcon size={18} />
+          )}
         </button>
 
         <div className={cn(documentType !== 'text' && 'dark:text-zinc-400')}>
@@ -510,11 +533,11 @@ const EditorHeader = ({
           <Home size={18} />
         </Link>
 
-        {isSignedIn && (
+        {isSignedIn ? (
           <div className='flex items-center ml-1'>
             <UserButton />
           </div>
-        )}
+        ) : null}
       </div>
     </header>
   )

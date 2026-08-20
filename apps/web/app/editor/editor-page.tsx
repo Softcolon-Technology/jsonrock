@@ -198,9 +198,16 @@ export default function Home({
   const lastPersistedContentRef = React.useRef<string>(currentJsonContent)
 
   // Clerk Authentication state
-  const { isSignedIn } = useUser()
-  const { getToken } = useAuth()
+  const { isSignedIn, isLoaded: isUserLoaded } = useUser()
+  const { getToken, isLoaded: isAuthLoaded } = useAuth()
   const { openSignIn } = useClerk()
+  // [AUTH-DEBUG] TEMP — remove after diagnosing stuck auth-loading
+  console.log('[AUTH-DEBUG] editor-page render', {
+    isUserLoaded,
+    isAuthLoaded,
+    isSignedIn,
+    hasPublishableKey: Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY),
+  })
   const pendingShareSettingsRef = React.useRef<{
     accessLevel: ShareAccessType
     isPrivateLink: boolean
@@ -1671,8 +1678,12 @@ export default function Home({
 
       pendingShareSettingsRef.current = null
       if (typeof window !== 'undefined') {
-        sessionStorage.removeItem('jsonrock_pending_share_settings')
-        sessionStorage.removeItem('jsonrock_pending_open_share_modal')
+        try {
+          sessionStorage.removeItem('jsonrock_pending_share_settings')
+          sessionStorage.removeItem('jsonrock_pending_open_share_modal')
+        } catch (e) {
+          console.warn('SessionStorage remove failed', e)
+        }
       }
       await executeShareDocument(settings)
     },
@@ -1696,14 +1707,16 @@ export default function Home({
       let pendingSettings = pendingShareSettingsRef.current
       let pendingOpenModal = pendingOpenShareModalRef.current
 
-      // Retrieve from sessionStorage if state was lost during OAuth redirect
-      if (!pendingSettings && typeof window !== 'undefined') {
+      // Retrieve from sessionStorage if state was lost during OAuth or sign-up redirect
+      if (typeof window !== 'undefined') {
         try {
-          const stored = sessionStorage.getItem(
-            'jsonrock_pending_share_settings'
-          )
-          if (stored) {
-            pendingSettings = JSON.parse(stored)
+          if (!pendingSettings) {
+            const stored = sessionStorage.getItem(
+              'jsonrock_pending_share_settings'
+            )
+            if (stored) {
+              pendingSettings = JSON.parse(stored)
+            }
           }
         } catch (e) {
           console.warn(
@@ -1711,15 +1724,15 @@ export default function Home({
             e
           )
         }
-      }
 
-      if (!pendingOpenModal && typeof window !== 'undefined') {
         try {
-          const storedModal = sessionStorage.getItem(
-            'jsonrock_pending_open_share_modal'
-          )
-          if (storedModal === 'true') {
-            pendingOpenModal = true
+          if (!pendingOpenModal) {
+            const storedModal = sessionStorage.getItem(
+              'jsonrock_pending_open_share_modal'
+            )
+            if (storedModal === 'true') {
+              pendingOpenModal = true
+            }
           }
         } catch (e) {
           console.warn(
@@ -1732,15 +1745,23 @@ export default function Home({
       if (pendingSettings) {
         pendingShareSettingsRef.current = null
         if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('jsonrock_pending_share_settings')
-          sessionStorage.removeItem('jsonrock_pending_open_share_modal')
+          try {
+            sessionStorage.removeItem('jsonrock_pending_share_settings')
+            sessionStorage.removeItem('jsonrock_pending_open_share_modal')
+          } catch (e) {
+            console.warn('SessionStorage cleanup failed', e)
+          }
         }
         executeShareDocument(pendingSettings)
       } else if (pendingOpenModal) {
         pendingOpenShareModalRef.current = false
         if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('jsonrock_pending_open_share_modal')
-          sessionStorage.removeItem('jsonrock_pending_share_settings')
+          try {
+            sessionStorage.removeItem('jsonrock_pending_open_share_modal')
+            sessionStorage.removeItem('jsonrock_pending_share_settings')
+          } catch (e) {
+            console.warn('SessionStorage cleanup failed', e)
+          }
         }
         setIsShareModalOpen(true)
       }
