@@ -7,12 +7,17 @@ export type ShareType = 'json' | 'text' | 'markdown' | 'html'
 
 export interface IShareLink extends Document {
   slug: string
+  ownerId?: string // Clerk User ID
   type: ShareType
-  json: string
+  schemaVersion?: number // 1 = legacy plaintext, 2 = E2EE AES-256-GCM
+  json?: string // Legacy plaintext content
+  passwordHash?: string // Legacy SHA-256 password hash
+  ciphertext?: string
+  iv?: string
+  salt?: string
   mode: JsonShareMode
   isPrivate: boolean
   accessType: ShareAccessType
-  passwordHash?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -20,8 +25,14 @@ export interface IShareLink extends Document {
 const ShareLinkSchema: Schema = new Schema(
   {
     slug: { type: String, required: true, unique: true },
+    ownerId: { type: String },
     type: { type: String, enum: ShareTypeEnum, default: ShareTypeEnum.JSON },
+    schemaVersion: { type: Number },
     json: { type: String },
+    passwordHash: { type: String },
+    ciphertext: { type: String },
+    iv: { type: String },
+    salt: { type: String },
     mode: {
       type: String,
       enum: ModeEnum,
@@ -33,7 +44,6 @@ const ShareLinkSchema: Schema = new Schema(
       enum: AccessTypeEnum,
       default: AccessTypeEnum.VIEWER,
     },
-    passwordHash: { type: String },
   },
   { timestamps: true }
 )

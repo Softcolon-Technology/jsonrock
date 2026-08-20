@@ -18,16 +18,23 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@clerk/backend": "^3.16.7",
+    "@clerk/express": "^2.1.58",
+    "@types/jsdom": "^30.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.6.2",
+    "isomorphic-dompurify": "^3.22.0",
     "joi": "^18.0.2",
+    "jsdom": "^30.0.1",
     "mongodb": "^6.21.0",
     "mongoose": "^8.22.0",
     "morgan": "^1.10.1",
     "multer": "^1.4.5-lts.1",
     "nodemon": "^3.1.11",
     "socket.io": "^4.7.5",
+    "svix": "^1.99.1",
     "winston": "^3.19.0"
   },
   "devDependencies": {

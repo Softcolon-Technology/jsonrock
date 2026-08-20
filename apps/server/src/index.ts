@@ -5,6 +5,7 @@ import { createServer } from 'http'
 import { Server } from 'socket.io'
 import { connectDB } from './db/conn'
 import shareRoutes from './routes/share.routes'
+import webhookRoutes from './routes/webhook.routes'
 import morgan from 'morgan'
 import logger from './config/logger'
 import globalErrorHandler from './middleware/errorLogger'
@@ -17,6 +18,9 @@ const httpServer = createServer(app)
 const PORT = process.env.PORT || 3005
 
 app.use(cors())
+
+// Webhook routes mounted BEFORE global express.json() to preserve raw body for Svix signature verification
+app.use('/api/webhooks', webhookRoutes)
 
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ limit: '10mb', extended: true }))

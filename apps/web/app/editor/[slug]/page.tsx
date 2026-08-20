@@ -34,11 +34,16 @@ export default async function EditorSlugPage({ params }: Props) {
       initialRecord = {
         slug: data.slug,
         type: data.type || 'json',
-        json: data.isPrivate
-          ? ''
-          : typeof data.data === 'string'
+        schemaVersion: data.schemaVersion || (data.isLegacyPlaintext ? 1 : 2),
+        isLegacyPlaintext: data.isLegacyPlaintext || false,
+        json: data.isLegacyPlaintext
+          ? typeof data.data === 'string'
             ? data.data
-            : JSON.stringify(data.data, null, 2),
+            : JSON.stringify(data.data, null, 2)
+          : data.json || '',
+        ciphertext: data.ciphertext || '',
+        iv: data.iv || '',
+        salt: data.salt || undefined,
         mode: data.mode || 'visualize',
         isPrivate: data.isPrivate || false,
         accessType: data.accessType || 'editor',

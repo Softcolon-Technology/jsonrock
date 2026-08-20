@@ -20,6 +20,7 @@ import SaveStatus from './header/save-status'
 import EditorActionBtn from '../button/editor-action-btn'
 import Link from 'next/link'
 import { FaGithub } from 'react-icons/fa6'
+import { UserButton, useUser } from '@clerk/nextjs'
 import {
   useCallback,
   useEffect,
@@ -114,6 +115,7 @@ const EditorHeader = ({
   currentViewMode,
   onOpenHistoryModal,
 }: Props) => {
+  const { isSignedIn } = useUser()
   const [isPending, startTransition] = useTransition()
   const [isOtherOpen, setIsOtherOpen] = useState(false)
   const [visibleCount, setVisibleCount] = useState(HEADER_ACTIONS.length)
@@ -310,7 +312,7 @@ const EditorHeader = ({
       <div
         ref={measureRef}
         aria-hidden
-        className='pointer-events-none absolute -left-[9999px] top-0 flex items-center gap-2 opacity-0'
+        className='pointer-events-none absolute -left-2499.75 top-0 flex items-center gap-2 opacity-0'
       >
         {HEADER_ACTIONS.map((action) => (
           <div
@@ -399,7 +401,7 @@ const EditorHeader = ({
               transform: 'translateX(-50%)',
             }}
             className={cn(
-              'z-[200] min-w-[12rem] max-w-[calc(100vw-1.5rem)] rounded-lg border border-zinc-200 bg-white p-1 shadow-xl',
+              'z-200 min-w-48 max-w-[calc(100vw-1.5rem)] rounded-lg border border-zinc-200 bg-white p-1 shadow-xl',
               documentType !== 'text' && 'dark:border-zinc-800 dark:bg-zinc-950'
             )}
           >
@@ -507,6 +509,12 @@ const EditorHeader = ({
         >
           <Home size={18} />
         </Link>
+
+        {isSignedIn && (
+          <div className='flex items-center ml-1'>
+            <UserButton />
+          </div>
+        )}
       </div>
     </header>
   )
