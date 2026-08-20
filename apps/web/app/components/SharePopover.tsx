@@ -37,6 +37,7 @@ interface SharePopoverProps {
   }) => Promise<void>
 
   isSavingSettings?: boolean
+  shareUrl?: string
 }
 
 export function SharePopover({
@@ -50,11 +51,13 @@ export function SharePopover({
   forceLightMode = false,
   onSaveShareSettings,
   isSavingSettings = false,
+  shareUrl = '',
 }: SharePopoverProps) {
   const [accessLevel, setAccessLevel] = useState<AccessType>(defaultAccessLevel)
   const [isPrivateLink, setIsPrivateLink] = useState(defaultIsPrivate)
   const [sharePassword, setSharePassword] = useState(defaultPassword)
   const [showPassword, setShowPassword] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   // Reset state when opening
   useEffect(() => {
@@ -62,6 +65,7 @@ export function SharePopover({
       setAccessLevel(defaultAccessLevel)
       setIsPrivateLink(defaultIsPrivate)
       setSharePassword(defaultPassword)
+      setCopied(false)
     }
   }, [isOpen, defaultAccessLevel, defaultIsPrivate, defaultPassword])
 
@@ -72,7 +76,7 @@ export function SharePopover({
   }
 
   return (
-    <div className='fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200'>
+    <div className='fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200'>
       {/* Overlay click to close */}
       <div className='absolute inset-0' onClick={onClose} />
 
@@ -254,10 +258,83 @@ export function SharePopover({
                 </button>
               </div>
               <p className='text-[10px] text-zinc-500'>
-                Anyone with the link will need to enter this password.
+                Anyone with the link will need to enter this password to decrypt
+                the document.
               </p>
             </div>
           )}
+
+          {/* Share Link Preview (if link exists) */}
+          {shareUrl && (
+            <div className='flex flex-col gap-1.5'>
+              <label className='text-xs font-medium text-zinc-500 uppercase tracking-wider'>
+                Share Link
+              </label>
+              <div className='flex items-center gap-2'>
+                <input
+                  type='text'
+                  readOnly
+                  value={shareUrl}
+                  className={cn(
+                    'flex-1 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-700 select-all font-mono truncate outline-none',
+                    !forceLightMode &&
+                      'dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-300'
+                  )}
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+                <button
+                  type='button'
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(shareUrl)
+                      setCopied(true)
+                      setTimeout(() => setCopied(false), 2500)
+                    } catch (e) {
+                      console.warn('Direct copy failed', e)
+                    }
+                  }}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all shrink-0 cursor-pointer',
+                    copied
+                      ? 'bg-emerald-600 text-white'
+                      : cn(
+                          'bg-zinc-100 hover:bg-zinc-200 text-zinc-800 border border-zinc-200',
+                          !forceLightMode &&
+                            'dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-200'
+                        )
+                  )}
+                >
+                  {copied ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{copied ? 'Copied!' : 'Copy'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* E2EE Info Callout */}
+          <div
+            className={cn(
+              'p-2.5 rounded-lg border text-xs flex items-start gap-2',
+              !forceLightMode
+                ? 'bg-emerald-50/50 border-emerald-200/60 text-emerald-800 dark:bg-emerald-950/20 dark:border-emerald-800/40 dark:text-emerald-300'
+                : 'bg-emerald-50/50 border-emerald-200/60 text-emerald-800'
+            )}
+          >
+            <Lock
+              size={14}
+              className='shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400'
+            />
+            <div className='flex flex-col gap-0.5'>
+              <span className='font-semibold'>
+                End-to-End Encrypted (Zero Knowledge)
+              </span>
+              <span className='text-[11px] opacity-90 leading-tight'>
+                The server never sees your content or keys. If a private
+                password or public link key is lost, content cannot be
+                recovered.
+              </span>
+            </div>
+          </div>
         </div>
 
         {!hasPermissionToConfigure && (

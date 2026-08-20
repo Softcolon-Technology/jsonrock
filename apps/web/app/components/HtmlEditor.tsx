@@ -1550,7 +1550,7 @@ const HtmlEditor: React.FC<HtmlEditorProps> = ({
                     sandbox={
                       safeMode
                         ? 'allow-same-origin'
-                        : 'allow-scripts allow-same-origin allow-modals allow-forms'
+                        : 'allow-scripts allow-modals allow-forms'
                     }
                     srcDoc={previewHtml}
                   />

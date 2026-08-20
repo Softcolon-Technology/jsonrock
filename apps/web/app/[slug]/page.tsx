@@ -36,7 +36,8 @@ export default async function RedirectToTextChat({ params }: Props) {
           body: JSON.stringify({
             slug: slug,
             type: 'text',
-            json: '',
+            ciphertext: '',
+            iv: '',
             mode: 'visualize',
             isPrivate: false,
             accessType: 'editor',

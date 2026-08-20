@@ -12,6 +12,7 @@ import {
   Lock,
   ArrowRight,
   AlertCircle,
+  AlertTriangle,
   UploadCloud,
   X,
   Loader2,
@@ -105,6 +106,17 @@ const DEFAULT_HTML_CONTENT = `<!DOCTYPE html>
   </div>
 </body>
 </html>`
+import {
+  decryptContent,
+  deriveKeyFromPassword,
+  encryptContent,
+  extractKeyFromFragment,
+  generateDocumentKey,
+  generateSalt,
+  importKeyFromFragment,
+  setKeyInFragment,
+} from '@/lib/crypto'
+import { useUser, useAuth, useClerk } from '@clerk/nextjs'
 
 export type JsonShareMode = 'visualize' | 'tree' | 'formatter'
 
@@ -114,11 +126,15 @@ export interface ShareLinkRecord {
   _id?: string
   slug: string
   type: ShareType
-  json: string // Content (json or text)
+  schemaVersion?: number
+  isLegacyPlaintext?: boolean
+  ciphertext: string
+  iv: string
+  salt?: string
+  json?: string // Content (json or text, populated after client decrypt or legacy load)
   mode: JsonShareMode
   isPrivate: boolean
   accessType?: ShareAccessType // Defaults to 'viewer' if undefined for old records
-  passwordHash?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -128,6 +144,9 @@ type SerializedShareLinkRecord = Omit<ShareLinkRecord, 'createdAt' | '_id'> & {
   _id?: string
   accessType?: ShareAccessType
   type?: ShareType
+  schemaVersion?: number
+  isLegacyPlaintext?: boolean
+  json?: string
 }
 
 interface HomeProps {
@@ -152,21 +171,59 @@ export default function Home({
   const effectiveFeatureMode = initialRecord?.type || paramType || featureMode
   const effectiveViewMode = paramView || initialRecord?.mode || 'visualize'
 
-  const [currentJsonContent, setCurrentJsonContent] = useState<string>(
-    initialRecord
-      ? initialRecord.json
-      : effectiveFeatureMode === 'text'
-        ? ''
-        : effectiveFeatureMode === 'markdown'
-          ? '# Hello Markdown\n\nStart typing...'
-          : effectiveFeatureMode === 'html'
-            ? DEFAULT_HTML_CONTENT
-            : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+  const [isLegacyDocument, setIsLegacyDocument] = useState<boolean>(
+    initialRecord?.isLegacyPlaintext ||
+      initialRecord?.schemaVersion === 1 ||
+      false
+  )
+  const [showMigrationBanner, setShowMigrationBanner] = useState<boolean>(
+    initialRecord?.isLegacyPlaintext ||
+      initialRecord?.schemaVersion === 1 ||
+      false
   )
 
-  const lastPersistedContentRef = React.useRef<string>(
-    initialRecord?.json || currentJsonContent
+  const [currentJsonContent, setCurrentJsonContent] = useState<string>(() => {
+    if (initialRecord?.isLegacyPlaintext && initialRecord.json) {
+      return initialRecord.json
+    }
+    return effectiveFeatureMode === 'text'
+      ? ''
+      : effectiveFeatureMode === 'markdown'
+        ? '# Hello Markdown\n\nStart typing...'
+        : effectiveFeatureMode === 'html'
+          ? DEFAULT_HTML_CONTENT
+          : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+  })
+
+  const lastPersistedContentRef = React.useRef<string>(currentJsonContent)
+
+  // Clerk Authentication state
+  const { isSignedIn } = useUser()
+  const { getToken } = useAuth()
+  const { openSignIn } = useClerk()
+  const pendingShareSettingsRef = React.useRef<{
+    accessLevel: ShareAccessType
+    isPrivateLink: boolean
+    sharePassword?: string
+  } | null>(null)
+  const pendingOpenShareModalRef = React.useRef<boolean>(false)
+
+  // Web Crypto Key and E2EE state (In-memory ONLY, NEVER persisted to IndexedDB or localStorage)
+  const activeKeyRef = React.useRef<CryptoKey | null>(null)
+  const activeKeyStringRef = React.useRef<string | null>(null)
+  const documentSaltRef = React.useRef<string | null>(
+    initialRecord?.salt || null
   )
+  const encryptedPayloadRef = React.useRef<{
+    ciphertext: string
+    iv: string
+  } | null>(
+    initialRecord?.ciphertext && initialRecord?.iv
+      ? { ciphertext: initialRecord.ciphertext, iv: initialRecord.iv }
+      : null
+  )
+  const [decryptionError, setDecryptionError] = useState<string | null>(null)
+  const [, setIsDecrypting] = useState<boolean>(false)
 
   // Use the new Web Worker for off-thread parsing and tree/graph building
   const {
@@ -269,43 +326,82 @@ export default function Home({
     return initialRecord.accessType === 'editor' // Non-owner: check accessType
   })
 
-  // Check ownership on load & Sync state when initialRecord changes (e.g. on navigation)
-  // Check ownership on load & Sync state when initialRecord changes (e.g. on navigation)
-  // Sync state when URL slug changes (Navigation / Refresh)
+  const [documentPassword, setDocumentPassword] = useState('')
+  const [isAutoSaving, setIsAutoSaving] = useState<boolean>(false)
+  // Track if the record is indefinitely private (persisted as private)
+  const [isPrivacyLocked, setIsPrivacyLocked] = useState(
+    initialRecord?.isPrivate || false
+  )
 
-  const syncFromData = useCallback(
-    (data: any) => {
-      let content = ''
-      // Handle new API structure { data: ..., type: ... }
-      if (data.type === 'json' && typeof data.data === 'object') {
-        content = JSON.stringify(data.data, null, 2)
-      } else {
-        // Fallback or Text mode
-        content = data.data || data.json || ''
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false)
+
+  // Locked State for Private Links
+  const [isPasswordLocked, setIsPasswordLocked] = useState(
+    (initialRecord?.isPrivate && !initialRecord?.json) || false
+  )
+  const [isUnlocking, setIsUnlocking] = useState(false)
+  const [unlockErrorMessage, setUnlockErrorMessage] = useState<string | null>(
+    null
+  )
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false)
+
+  /**
+   * Generates or imports the active AES-256-GCM encryption key for the current document.
+   */
+  const getOrCreateDocumentKey = useCallback(async (): Promise<{
+    key: CryptoKey
+    keyString?: string
+  }> => {
+    if (activeKeyRef.current) {
+      return {
+        key: activeKeyRef.current,
+        keyString: activeKeyStringRef.current || undefined,
       }
+    }
 
-      setCurrentJsonContent(content)
+    // Check URL fragment first
+    const fragmentKey = extractKeyFromFragment()
+    if (fragmentKey) {
+      try {
+        const key = await importKeyFromFragment(fragmentKey)
+        activeKeyRef.current = key
+        activeKeyStringRef.current = fragmentKey
+        return { key, keyString: fragmentKey }
+      } catch (e) {
+        console.error('Failed to import key from fragment', e)
+      }
+    }
+
+    // Generate new key
+    const { key, keyString } = await generateDocumentKey()
+    activeKeyRef.current = key
+    activeKeyStringRef.current = keyString
+    setKeyInFragment(keyString)
+    return { key, keyString }
+  }, [])
+
+  /**
+   * Decrypts record ciphertext and populates editor state.
+   */
+  const decryptAndApplyData = useCallback(
+    async (data: any, customPassword?: string) => {
+      setIsDecrypting(true)
+      setDecryptionError(null)
+      setUnlockErrorMessage(null)
+
+      const ciphertext = data.ciphertext || ''
+      const iv = data.iv || ''
+      const salt = data.salt || null
+      const isPrivate = data.isPrivate || false
+
+      documentSaltRef.current = salt
+      encryptedPayloadRef.current = { ciphertext, iv }
+
       setDocumentSlug(data.slug || null)
-      setIsDocumentPrivate(data.isPrivate || false)
+      setIsDocumentPrivate(isPrivate)
       setUserAccessLevel(data.accessType || 'viewer')
       setDocumentType(data.type || 'json')
-      // URL param (?view=) takes priority over DB stored mode — it's the explicit user intent
       setCurrentViewMode(paramView || data.mode || 'visualize')
-      setSyncedRemoteContent({ code: content, nonce: Date.now() })
-
-      // Handle Locking
-      if (data.isPrivate) {
-        setIsPrivacyLocked(true)
-        // If content is missing/masked, it is locked.
-        const isLockedState = data.data === null || data.data === undefined
-        setIsPasswordLocked(isLockedState)
-      } else {
-        setIsPasswordLocked(false)
-        setIsPrivacyLocked(false)
-      }
-
-      // CRITICAL: Update lastSavedContent to current loaded content
-      lastPersistedContentRef.current = content
 
       if (data.slug) {
         const isOwned = checkOwnership(data.slug)
@@ -320,8 +416,120 @@ export default function Home({
         setIsCurrentUserOwner(true)
         setHasEditPermission(true)
       }
+
+      // Handle Legacy Plaintext Documents (schemaVersion missing or 1)
+      const isLegacy = Boolean(
+        data.isLegacyPlaintext || data.schemaVersion === 1
+      )
+      if (isLegacy) {
+        setIsLegacyDocument(true)
+        setShowMigrationBanner(true)
+        setIsDecrypting(false)
+
+        let content = ''
+        if (
+          data.type === 'json' &&
+          typeof data.data === 'object' &&
+          data.data !== null
+        ) {
+          content = JSON.stringify(data.data, null, 2)
+        } else {
+          content = data.data || data.json || ''
+        }
+
+        if (isPrivate) {
+          setIsPrivacyLocked(true)
+          const isLocked = data.data === null || data.data === undefined
+          setIsPasswordLocked(isLocked)
+        } else {
+          setIsPasswordLocked(false)
+          setIsPrivacyLocked(false)
+        }
+
+        if (content || !isPrivate) {
+          setCurrentJsonContent(content)
+          setSyncedRemoteContent({ code: content, nonce: Date.now() })
+          lastPersistedContentRef.current = content
+        }
+        return
+      }
+
+      setIsLegacyDocument(false)
+      setShowMigrationBanner(false)
+
+      // If empty ciphertext (newly created doc)
+      if (!ciphertext) {
+        const defaultContent =
+          data.type === 'text'
+            ? ''
+            : data.type === 'markdown'
+              ? '# Hello Markdown\n\nStart typing...'
+              : data.type === 'html'
+                ? DEFAULT_HTML_CONTENT
+                : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+        setCurrentJsonContent(defaultContent)
+        setSyncedRemoteContent({ code: defaultContent, nonce: Date.now() })
+        lastPersistedContentRef.current = defaultContent
+        setIsPasswordLocked(false)
+        setIsPrivacyLocked(isPrivate)
+        setIsDecrypting(false)
+        return
+      }
+
+      try {
+        let key: CryptoKey | null = null
+
+        if (isPrivate) {
+          const pwd = customPassword || documentPassword
+          if (!pwd) {
+            setIsPasswordLocked(true)
+            setIsPrivacyLocked(true)
+            setIsDecrypting(false)
+            return
+          }
+          if (!salt) {
+            throw new Error(
+              'Missing encryption salt for password-protected document'
+            )
+          }
+          key = await deriveKeyFromPassword(pwd, salt)
+          activeKeyRef.current = key
+        } else {
+          const keyString = extractKeyFromFragment()
+          if (!keyString) {
+            setDecryptionError(
+              'This document is end-to-end encrypted, but no encryption key was found in the link. Please ensure your link includes the #key=... fragment.'
+            )
+            setIsDecrypting(false)
+            return
+          }
+          key = await importKeyFromFragment(keyString)
+          activeKeyRef.current = key
+          activeKeyStringRef.current = keyString
+        }
+
+        const plaintext = await decryptContent(ciphertext, iv, key)
+        setCurrentJsonContent(plaintext)
+        setSyncedRemoteContent({ code: plaintext, nonce: Date.now() })
+        lastPersistedContentRef.current = plaintext
+        setIsPasswordLocked(false)
+        setIsPrivacyLocked(isPrivate)
+        setDecryptionError(null)
+      } catch (err) {
+        console.error('Decryption failed:', err)
+        if (isPrivate) {
+          setUnlockErrorMessage('Incorrect password. Unable to decrypt.')
+          setIsPasswordLocked(true)
+        } else {
+          setDecryptionError(
+            'Failed to decrypt document. The encryption key in the URL may be invalid or corrupted.'
+          )
+        }
+      } finally {
+        setIsDecrypting(false)
+      }
     },
-    [checkOwnership]
+    [checkOwnership, documentPassword, paramView]
   )
 
   const syncFromLocalRecord = useCallback(
@@ -356,24 +564,25 @@ export default function Home({
   // Ref to prevent initial fetch when we JUST created the slug via auto-save
   const justAutoSavedSlugRef = React.useRef<string | null>(null)
 
+  // Initial SSR Hydration & Key Decryption
+  useEffect(() => {
+    if (initialRecord && initialRecord.slug) {
+      decryptAndApplyData(initialRecord)
+    }
+  }, []) // Mount only
+
   // Sync state when URL slug changes (Navigation / Refresh)
   useEffect(() => {
     if (urlSlug) {
-      // If we just generated this slug from typing locally, do NOT fetch from DB.
-      // This prevents a race condition where fetching overwrites the user's current unsaved keystrokes.
       if (justAutoSavedSlugRef.current === urlSlug) {
         justAutoSavedSlugRef.current = null
         return
       }
 
-      // On the very first mount, SSR already hydrated state from initialRecord — skip the fetch
       if (isInitialMountRef.current) {
         isInitialMountRef.current = false
         setIsPageLoading(false)
 
-        // CRITICAL FIX: SSR cannot access cookies, meaning initial renders on a deployed server
-        // will incorrectly default to "viewer" status for the owner.
-        // We must re-check the cookie immediately on the client side upon hydration.
         const isOwnedOnClient = checkOwnership(urlSlug)
         if (isOwnedOnClient) {
           setIsCurrentUserOwner(true)
@@ -399,7 +608,7 @@ export default function Home({
 
           const data = await res.json()
           if (data && !data.error) {
-            syncFromData(data)
+            await decryptAndApplyData(data)
             return
           }
         } catch (err) {
@@ -445,7 +654,6 @@ export default function Home({
               ? DEFAULT_HTML_CONTENT
               : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
 
-      // Reset the state to an empty un-saved document canvas
       setCurrentJsonContent(defaultContent)
       setDocumentSlug(null)
       setIsDocumentPrivate(false)
@@ -462,10 +670,20 @@ export default function Home({
       setHasEditPermission(true)
       setSyncedRemoteContent({ code: defaultContent, nonce: Date.now() })
       lastPersistedContentRef.current = defaultContent
+      activeKeyRef.current = null
+      activeKeyStringRef.current = null
+      setDecryptionError(null)
       resetWorker()
       setIsPageLoading(false)
     }
-  }, [urlSlug, featureMode, syncFromData, syncFromLocalRecord, resetWorker])
+  }, [
+    urlSlug,
+    featureMode,
+    decryptAndApplyData,
+    syncFromLocalRecord,
+    resetWorker,
+    checkOwnership,
+  ])
 
   // Sync currentViewMode with URL parameter changes (for browser back/forward navigation)
   useEffect(() => {
@@ -492,25 +710,6 @@ export default function Home({
     setIsCurrentUserOwner(true)
   }
 
-  const [documentPassword, setDocumentPassword] = useState('')
-  const [isAutoSaving, setIsAutoSaving] = useState<boolean>(false)
-  // Track if the record is indefinitely private (persisted as private)
-  const [isPrivacyLocked, setIsPrivacyLocked] = useState(
-    initialRecord?.isPrivate || false
-  )
-
-  const [isShareModalOpen, setIsShareModalOpen] = useState(false)
-
-  // Locked State for Private Links
-  const [isPasswordLocked, setIsPasswordLocked] = useState(
-    (initialRecord?.isPrivate && !initialRecord?.json) || false
-  )
-  const [isUnlocking, setIsUnlocking] = useState(false)
-  const [unlockErrorMessage, setUnlockErrorMessage] = useState<string | null>(
-    null
-  )
-  const [isPasswordVisible, setIsPasswordVisible] = useState(false)
-
   // Refs for stable callback access
   const slugRef = React.useRef(documentSlug)
   const isLockedRef = React.useRef(isPasswordLocked)
@@ -534,22 +733,28 @@ export default function Home({
     // Debounce socket emission to prevent flooding/lag
     if (emitTimeout.current) clearTimeout(emitTimeout.current)
 
-    emitTimeout.current = setTimeout(() => {
-      // Emit change if we have a slug and aren't locked (regardless of validity)
-      if (slugRef.current && !isLockedRef.current) {
+    emitTimeout.current = setTimeout(async () => {
+      // Emit encrypted change if we have a slug and aren't locked
+      if (slugRef.current && !isLockedRef.current && activeKeyRef.current) {
         const socket = getSocket()
         if (socket && socket.connected) {
-          socket.emit('code-change', { slug: slugRef.current, newCode: code })
+          try {
+            const encrypted = await encryptContent(code, activeKeyRef.current)
+            socket.emit('code-change', {
+              slug: slugRef.current,
+              newCode: JSON.stringify(encrypted),
+            })
+          } catch (e) {
+            console.error('Socket encryption failed', e)
+          }
         }
       }
     }, 100)
-  }, []) // ID IS STABLE NOW
+  }, [])
 
-  // Socket Effect - OPTIMIZED for Production
+  // Socket Effect - OPTIMIZED for Production with E2EE Relay
   useEffect(() => {
     if (!documentSlug) return
-
-    // Skip socket connection for locked private content (no collaboration possible)
     if (isDocumentPrivate && isPasswordLocked) return
 
     const socket = getSocket()
@@ -558,40 +763,50 @@ export default function Home({
       socket.emit('join-room', documentSlug)
     }
 
-    const onCodeChange = (newCode: string) => {
-      // If we receive an update, we treat it as the source of truth
-      setCurrentJsonContent(newCode)
-      setSyncedRemoteContent({ code: newCode, nonce: Date.now() })
-      // CRITICAL: Mark as saved to prevent duplicate auto-save from this browser
-      lastPersistedContentRef.current = newCode
+    const onCodeChange = async (payloadStr: string) => {
+      if (!activeKeyRef.current) return
+      try {
+        let payload: { ciphertext: string; iv: string }
+        try {
+          payload = JSON.parse(payloadStr)
+        } catch {
+          return
+        }
+
+        if (payload.ciphertext && payload.iv) {
+          const newCode = await decryptContent(
+            payload.ciphertext,
+            payload.iv,
+            activeKeyRef.current
+          )
+          setCurrentJsonContent(newCode)
+          setSyncedRemoteContent({ code: newCode, nonce: Date.now() })
+          lastPersistedContentRef.current = newCode
+        }
+      } catch (e) {
+        console.error('Failed to decrypt incoming socket message', e)
+      }
     }
 
-    // CRITICAL FIX: Only connect if not already connected
-    // This prevents reconnection churn when slug changes
     if (!socket.connected) {
       socket.connect()
     } else {
-      // Already connected, just join the new room
       onConnect()
     }
 
     socket.on('connect', onConnect)
     socket.on('code-change', onCodeChange)
 
-    // Handle immediate connection case
     if (socket.connected) {
       onConnect()
     }
 
     return () => {
-      // CRITICAL FIX: Only remove OUR listeners, don't disconnect
-      // This prevents reconnection churn when component re-renders
       socket.off('connect', onConnect)
       socket.off('code-change', onCodeChange)
-      // Leave the room but stay connected for potential reuse
       socket.emit('leave-room', documentSlug)
     }
-  }, [documentSlug, isPasswordLocked]) // CRITICAL: Include isLocked so socket connects after unlock
+  }, [documentSlug, isPasswordLocked, isDocumentPrivate])
 
   // Alert State
   const [alertState, setAlertState] = useState<{
@@ -736,45 +951,104 @@ export default function Home({
   ])
 
   const handleUnlockDocument = async () => {
-    if (!initialRecord?.slug) return
+    if (!documentPassword) return
     setIsUnlocking(true)
     setUnlockErrorMessage(null)
 
-    // Capture the password before the async call so it survives any re-renders
-    const password = documentPassword
+    const slug = documentSlug || initialRecord?.slug
 
-    try {
-      const res = await fetch(`/api/share/${initialRecord.slug}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setUnlockErrorMessage(data.error || 'Failed to unlock')
-        return
-      }
+    if (isLegacyDocument) {
+      // Legacy unlock: check password against backend SHA-256 hash
+      try {
+        const res = await fetch(`/api/share/${slug}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: documentPassword }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          setUnlockErrorMessage(data.error || 'Invalid password')
+          return
+        }
 
-      // Success — persist the password so auto-save can re-encrypt
-      setDocumentPassword(password)
-      syncFromData(data)
+        let content = ''
+        if (
+          data.type === 'json' &&
+          typeof data.data === 'object' &&
+          data.data !== null
+        ) {
+          content = JSON.stringify(data.data, null, 2)
+        } else {
+          content = data.data || data.json || ''
+        }
 
-      // Check if I am actually the owner (maybe I created it on this device?)
-      const ownedSlugs = Cookies.get('json-rock-owned')
-      if (ownedSlugs) {
-        try {
-          const parsed = JSON.parse(ownedSlugs)
-          if (Array.isArray(parsed) && parsed.includes(initialRecord.slug)) {
-            setIsCurrentUserOwner(true)
-            setHasEditPermission(true)
+        setCurrentJsonContent(content)
+        setSyncedRemoteContent({ code: content, nonce: Date.now() })
+        lastPersistedContentRef.current = content
+        setIsPasswordLocked(false)
+        setIsPrivacyLocked(true)
+        setUnlockErrorMessage(null)
+
+        if (slug) {
+          const ownedSlugs = Cookies.get('json-rock-owned')
+          if (ownedSlugs) {
+            try {
+              const parsed = JSON.parse(ownedSlugs)
+              if (Array.isArray(parsed) && parsed.includes(slug)) {
+                setIsCurrentUserOwner(true)
+                setHasEditPermission(true)
+              }
+            } catch (e) {}
           }
-        } catch (e) {}
+        }
+      } catch (err) {
+        console.error('Legacy unlock error:', err)
+        setUnlockErrorMessage('Failed to unlock document.')
+      } finally {
+        setIsUnlocking(false)
+      }
+      return
+    }
+
+    // E2EE (v2) Unlock: client-side PBKDF2 decryption
+    try {
+      const salt = documentSaltRef.current
+      const payload = encryptedPayloadRef.current
+      if (!salt || !payload?.ciphertext) {
+        throw new Error('No encrypted data or salt found to unlock')
       }
 
-      setIsPrivacyLocked(data.isPrivate)
+      const key = await deriveKeyFromPassword(documentPassword, salt)
+      const plaintext = await decryptContent(
+        payload.ciphertext,
+        payload.iv,
+        key
+      )
+
+      activeKeyRef.current = key
+      activeKeyStringRef.current = null
+      setCurrentJsonContent(plaintext)
+      setSyncedRemoteContent({ code: plaintext, nonce: Date.now() })
+      lastPersistedContentRef.current = plaintext
       setIsPasswordLocked(false)
+      setIsPrivacyLocked(true)
+      setUnlockErrorMessage(null)
+
+      if (slug) {
+        const ownedSlugs = Cookies.get('json-rock-owned')
+        if (ownedSlugs) {
+          try {
+            const parsed = JSON.parse(ownedSlugs)
+            if (Array.isArray(parsed) && parsed.includes(slug)) {
+              setIsCurrentUserOwner(true)
+              setHasEditPermission(true)
+            }
+          } catch (e) {}
+        }
+      }
     } catch (err) {
-      setUnlockErrorMessage((err as Error).message)
+      console.error('Unlock error:', err)
+      setUnlockErrorMessage('Incorrect password. Unable to decrypt.')
     } finally {
       setIsUnlocking(false)
     }
@@ -801,32 +1075,42 @@ export default function Home({
 
     setCurrentJsonContent(initialContent)
     setDocumentSlug(null)
+    setIsLegacyDocument(false)
+    setShowMigrationBanner(false)
     setIsDocumentPrivate(false)
     setIsPrivacyLocked(false)
-    setUserAccessLevel('viewer') // Default for new link settings
-    setHasEditPermission(true) // New file is always editable
+    setUserAccessLevel('viewer')
+    setHasEditPermission(true)
     setDocumentPassword('')
+    setDecryptionError(null)
     setSyncedRemoteContent({
       code: initialContent,
       nonce: Date.now(),
     })
 
-    // Set view mode to formatter for JSON documents
     if (!isText && !isMarkdown && !isHtml) {
       setCurrentViewMode('formatter')
     }
 
-    // Create initial record
     setIsAutoSaving(true)
     try {
+      const { key, keyString } = await generateDocumentKey()
+      activeKeyRef.current = key
+      activeKeyStringRef.current = keyString
+      const { ciphertext, iv } = await encryptContent(initialContent, key)
+      encryptedPayloadRef.current = { ciphertext, iv }
+
       const res = await fetch('/api/share', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          json: initialContent,
+          schemaVersion: 2,
+          ciphertext,
+          iv,
           mode: isText || isMarkdown || isHtml ? currentViewMode : 'formatter',
           type: targetType,
           accessType: 'editor',
+          isPrivate: false,
         }),
       })
       const data = await res.json()
@@ -837,6 +1121,7 @@ export default function Home({
         setIsCurrentUserOwner(true)
         setDocumentType(data.type || targetType)
         addOwnership(data.slug)
+        lastPersistedContentRef.current = initialContent
 
         const resolvedType = (data.type || targetType) as ShareType
         const route = `${getEditorBasePath(resolvedType)}/`
@@ -846,9 +1131,8 @@ export default function Home({
           resolvedType === 'html'
             ? ''
             : '?view=formatter'
-        const newUrl = `${route}${data.slug}${viewParam}`
+        const newUrl = `${route}${data.slug}${viewParam}#key=${keyString}`
 
-        // Use pushState to update URL without refresh
         window.history.pushState(
           { ...window.history.state, as: newUrl, url: newUrl },
           '',
@@ -865,28 +1149,58 @@ export default function Home({
   // Save Button Handler
   const handleSaveDocument = async (silent = false) => {
     if (!documentSlug) return
-
-    if (isDocumentPrivate && documentPassword.length < 4) {
-      if (!silent)
-        triggerAlert(
-          'Invalid Password',
-          'Password must be at least 4 characters for private links.',
-          'error'
-        )
-      return
-    }
+    if (isPasswordLocked) return
 
     setIsAutoSaving(true)
     try {
+      const wasLegacy = isLegacyDocument
+      let key = activeKeyRef.current
+      let salt = documentSaltRef.current
+      let keyString: string | undefined = undefined
+
+      if (isDocumentPrivate) {
+        if (documentPassword.length < 4 && !key) {
+          if (!silent)
+            triggerAlert(
+              'Invalid Password',
+              'Password must be at least 4 characters for private links.',
+              'error'
+            )
+          setIsAutoSaving(false)
+          return
+        }
+        if (!salt || wasLegacy) {
+          salt = generateSalt()
+          documentSaltRef.current = salt
+        }
+        if (!key && documentPassword) {
+          key = await deriveKeyFromPassword(documentPassword, salt)
+          activeKeyRef.current = key
+        }
+      } else {
+        if (!key) {
+          const generated = await getOrCreateDocumentKey()
+          key = generated.key
+          keyString = generated.keyString
+        }
+      }
+
+      if (!key) throw new Error('No encryption key available for saving')
+
+      const { ciphertext, iv } = await encryptContent(currentJsonContent, key)
+      encryptedPayloadRef.current = { ciphertext, iv }
+
       const res = await fetch(`/api/share/${documentSlug}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          json: currentJsonContent,
+          schemaVersion: 2,
+          ciphertext,
+          iv,
+          salt: isDocumentPrivate ? salt || undefined : undefined,
           mode: currentViewMode,
           isPrivate: isDocumentPrivate,
-          accessType: userAccessLevel, // Preserve current access settings
-          password: isDocumentPrivate ? documentPassword : undefined,
+          accessType: userAccessLevel,
           type: documentType,
         }),
       })
@@ -897,13 +1211,45 @@ export default function Home({
           addOwnership(documentSlug)
         }
         if (isDocumentPrivate) setIsPrivacyLocked(true)
-        lastPersistedContentRef.current = currentJsonContent // Update last saved reference
-        if (!silent)
+        lastPersistedContentRef.current = currentJsonContent
+
+        // If this document was legacy, it is now migrated!
+        if (wasLegacy) {
+          setIsLegacyDocument(false)
+          setShowMigrationBanner(false)
+
+          // Update URL in-place to include #key=... for public links
+          if (!isDocumentPrivate) {
+            const resolvedType = documentType
+            const route = `${getEditorBasePath(resolvedType)}/`
+            const viewParam =
+              resolvedType === 'text' ||
+              resolvedType === 'markdown' ||
+              resolvedType === 'html'
+                ? ''
+                : `?view=${currentViewMode}`
+            const currentKey = keyString || activeKeyStringRef.current || ''
+            const newUrl = `${route}${documentSlug}${viewParam}#key=${currentKey}`
+
+            window.history.replaceState(
+              { ...window.history.state, as: newUrl, url: newUrl },
+              '',
+              newUrl
+            )
+          }
+
+          setToastState({
+            isOpen: true,
+            message:
+              'Document upgraded to End-to-End Encryption! Share the updated link with collaborators.',
+          })
+        } else if (!silent) {
           triggerAlert(
             'Saved Successfully',
-            'Your changes have been saved.',
+            'Your encrypted changes have been saved.',
             'success'
           )
+        }
       } else {
         const err = data
         if (!silent)
@@ -918,7 +1264,7 @@ export default function Home({
       if (!silent)
         triggerAlert(
           'Save Failed',
-          'Network error or server unreachable.',
+          (e as Error).message || 'Network error or server unreachable.',
           'error'
         )
     } finally {
@@ -988,7 +1334,7 @@ export default function Home({
           'Please select a valid .md file.',
           'error'
         )
-        if (fileInputRef.current) fileInputRef.current.value = '' // Reset input
+        if (fileInputRef.current) fileInputRef.current.value = ''
         setIsUploadModalOpen(false)
         return
       }
@@ -999,19 +1345,18 @@ export default function Home({
           'Please select a valid .json file.',
           'error'
         )
-        if (fileInputRef.current) fileInputRef.current.value = '' // Reset input
+        if (fileInputRef.current) fileInputRef.current.value = ''
         setIsUploadModalOpen(false)
         return
       }
     } else {
-      // General validation for text or other modes
       if (!isJson && !isMarkdown && !isText) {
         triggerAlert(
           'Upload Failed',
           'Please select a valid .json, .md, or .txt file.',
           'error'
         )
-        if (fileInputRef.current) fileInputRef.current.value = '' // Reset input
+        if (fileInputRef.current) fileInputRef.current.value = ''
         setIsUploadModalOpen(false)
         return
       }
@@ -1019,23 +1364,33 @@ export default function Home({
 
     if (file.size > 2 * 1024 * 1024) {
       triggerAlert('Upload Failed', 'File size exceeds the 2MB limit.', 'error')
-      if (fileInputRef.current) fileInputRef.current.value = '' // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = ''
       setIsUploadModalOpen(false)
       return
     }
 
     setIsFileUploading(true)
-
-    // Read the file content locally before uploading (so we can display it without backend returning it)
     const fileContent = await file.text()
 
-    const formData = new FormData()
-    formData.append('file', file)
-
     try {
-      const res = await fetch('/api/upload', {
+      const targetType = isJson ? 'json' : isMarkdown ? 'markdown' : 'text'
+      const { key, keyString } = await generateDocumentKey()
+      activeKeyRef.current = key
+      activeKeyStringRef.current = keyString
+      const { ciphertext, iv } = await encryptContent(fileContent, key)
+      encryptedPayloadRef.current = { ciphertext, iv }
+
+      const res = await fetch('/api/share', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ciphertext,
+          iv,
+          mode: isJson ? 'formatter' : 'visualize',
+          type: targetType,
+          accessType: 'editor',
+          isPrivate: false,
+        }),
       })
 
       const data = await res.json()
@@ -1043,8 +1398,6 @@ export default function Home({
         throw new Error(data.error || 'Upload failed')
       }
 
-      // Success - Update state locally and change URL in-place
-      const targetType = isJson ? 'json' : isMarkdown ? 'markdown' : 'text'
       if (isJson) setCurrentViewMode('formatter')
       setDocumentType(targetType)
       setDocumentSlug(data.slug)
@@ -1057,7 +1410,7 @@ export default function Home({
             ? '/editor/markdown/'
             : '/editor/text/'
       const viewQuery = isJson ? '?view=formatter' : ''
-      const newUrl = `${routePrefix}${data.slug}${viewQuery}`
+      const newUrl = `${routePrefix}${data.slug}${viewQuery}#key=${keyString}`
 
       window.history.pushState(
         { ...window.history.state, as: newUrl, url: newUrl },
@@ -1065,7 +1418,6 @@ export default function Home({
         newUrl
       )
 
-      // Update the editor with the locally-read file content (no backend change needed)
       setCurrentJsonContent(fileContent)
       setSyncedRemoteContent({ code: fileContent, nonce: Date.now() })
       lastPersistedContentRef.current = fileContent
@@ -1088,7 +1440,6 @@ export default function Home({
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
-    // Only allow drag for markdown
     if (documentType === 'markdown') {
       setIsDragOver(true)
     }
@@ -1105,7 +1456,6 @@ export default function Home({
     e.stopPropagation()
     setIsDragOver(false)
 
-    // Only allow drop for markdown
     if (documentType !== 'markdown') return
 
     const file = e.dataTransfer.files?.[0]
@@ -1113,97 +1463,289 @@ export default function Home({
     await processSelectedFile(file)
   }
 
-  const handleShareDocument = async (settings: {
-    accessLevel: ShareAccessType
-    isPrivateLink: boolean
-    sharePassword?: string
-  }) => {
-    // Validate
-    if (
-      settings.isPrivateLink &&
-      (!settings.sharePassword || settings.sharePassword.length < 4)
-    ) {
-      triggerAlert(
-        'Invalid Password',
-        'Password must be at least 4 characters.',
-        'error'
-      )
-      return
-    }
+  const executeShareDocument = useCallback(
+    async (settings: {
+      accessLevel: ShareAccessType
+      isPrivateLink: boolean
+      sharePassword?: string
+    }) => {
+      setIsAutoSaving(true)
+      const method = documentSlug ? 'PUT' : 'POST'
+      const url = documentSlug ? `/api/share/${documentSlug}` : '/api/share'
 
-    setIsAutoSaving(true)
-    // If no slug, create new
-    const method = documentSlug ? 'PUT' : 'POST'
-    const url = documentSlug ? `/api/share/${documentSlug}` : '/api/share'
-
-    try {
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          json: currentJsonContent,
-          mode: currentViewMode,
-          isPrivate: settings.isPrivateLink,
-          accessType: settings.accessLevel,
-          password: settings.sharePassword,
-          type: documentType,
-        }),
-      })
-
-      const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.error || 'Share failed')
-      }
-
-      // Success
-      const newSlug = data.slug || documentSlug
-      if (newSlug !== documentSlug) {
-        setDocumentSlug(newSlug)
-        addOwnership(newSlug) // Mark as owner of new/updated slug
-
-        const route = `${getEditorBasePath(documentType)}/`
-        const viewParam =
-          documentType === 'text' ||
-          documentType === 'markdown' ||
-          documentType === 'html'
-            ? ''
-            : `?view=${currentViewMode}`
-        const newUrl = `${route}${newSlug}${viewParam}`
-
-        // Update URL in-place
-        window.history.pushState(
-          { ...window.history.state, as: newUrl, url: newUrl },
-          '',
-          newUrl
-        )
-      }
-
-      // Update local state
-      setUserAccessLevel(settings.accessLevel)
-      setIsDocumentPrivate(settings.isPrivateLink)
-      if (settings.isPrivateLink) setIsPrivacyLocked(true)
-      if (settings.sharePassword) setDocumentPassword(settings.sharePassword)
-
-      // Copy Link
-      const route = `${getEditorBasePath(documentType)}/`
-      const link = `${window.location.origin}${route}${newSlug}`
-      let message = 'Settings saved and link copied to clipboard!'
       try {
-        await navigator.clipboard.writeText(link)
-      } catch (err) {
-        console.warn('Clipboard write failed', err)
-        message = 'Settings saved. You can copy the link from the address bar.'
+        let token: string | null = null
+        try {
+          token = await getToken()
+        } catch (e) {
+          console.warn('Failed to retrieve Clerk auth token', e)
+        }
+
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        }
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`
+        }
+
+        let key: CryptoKey
+        let salt: string | undefined = undefined
+        let keyString: string | undefined = undefined
+
+        if (settings.isPrivateLink) {
+          salt = generateSalt()
+          documentSaltRef.current = salt
+          key = await deriveKeyFromPassword(settings.sharePassword!, salt)
+          activeKeyRef.current = key
+          activeKeyStringRef.current = null
+        } else {
+          const generated = await getOrCreateDocumentKey()
+          key = generated.key
+          keyString = generated.keyString
+        }
+
+        const { ciphertext, iv } = await encryptContent(currentJsonContent, key)
+        encryptedPayloadRef.current = { ciphertext, iv }
+
+        const res = await fetch(url, {
+          method,
+          headers,
+          body: JSON.stringify({
+            schemaVersion: 2,
+            ciphertext,
+            iv,
+            salt: settings.isPrivateLink ? salt : undefined,
+            mode: currentViewMode,
+            isPrivate: settings.isPrivateLink,
+            accessType: settings.accessLevel,
+            type: documentType,
+          }),
+        })
+
+        const data = await res.json()
+        if (!res.ok) {
+          throw new Error(data.error || 'Share failed')
+        }
+
+        setIsLegacyDocument(false)
+        setShowMigrationBanner(false)
+
+        const newSlug = data.slug || documentSlug
+        if (newSlug) {
+          setDocumentSlug(newSlug)
+          addOwnership(newSlug)
+
+          const route = `${getEditorBasePath(documentType)}/`
+          const viewParam =
+            documentType === 'text' ||
+            documentType === 'markdown' ||
+            documentType === 'html'
+              ? ''
+              : `?view=${currentViewMode}`
+          const fragment = settings.isPrivateLink
+            ? ''
+            : `#key=${keyString || activeKeyStringRef.current || ''}`
+          const newUrl = `${route}${newSlug}${viewParam}${fragment}`
+
+          window.history.pushState(
+            { ...window.history.state, as: newUrl, url: newUrl },
+            '',
+            newUrl
+          )
+        }
+
+        setUserAccessLevel(settings.accessLevel)
+        setIsDocumentPrivate(settings.isPrivateLink)
+        if (settings.isPrivateLink) setIsPrivacyLocked(true)
+        if (settings.sharePassword) setDocumentPassword(settings.sharePassword)
+
+        // Copy Link (Includes #key=... for public links, clean link for private links)
+        const route = `${getEditorBasePath(documentType)}/`
+        const fragment = settings.isPrivateLink
+          ? ''
+          : `#key=${keyString || activeKeyStringRef.current || ''}`
+        const link = `${window.location.origin}${route}${newSlug}${fragment}`
+        let message = 'Settings saved and encrypted link copied to clipboard!'
+        try {
+          await navigator.clipboard.writeText(link)
+        } catch (err) {
+          console.warn('Clipboard write failed', err)
+          message = 'Settings saved. Copy your link below!'
+        }
+
+        // Open/display the Share modal so the user can easily see and copy the link
+        setIsShareModalOpen(true)
+        setToastState({ isOpen: true, message })
+      } catch (e) {
+        console.error(e)
+        triggerAlert('Share Failed', (e as Error).message, 'error')
+      } finally {
+        setIsAutoSaving(false)
+      }
+    },
+    [
+      documentSlug,
+      documentType,
+      currentViewMode,
+      currentJsonContent,
+      getToken,
+      getOrCreateDocumentKey,
+      addOwnership,
+    ]
+  )
+
+  const openAuthModal = useCallback(
+    (options?: {
+      pendingSettings?: {
+        accessLevel: ShareAccessType
+        isPrivateLink: boolean
+        sharePassword?: string
+      }
+      pendingOpenModal?: boolean
+    }) => {
+      const currentUrl =
+        typeof window !== 'undefined' ? window.location.href : '/editor'
+
+      if (options?.pendingSettings) {
+        pendingShareSettingsRef.current = options.pendingSettings
+        if (typeof window !== 'undefined') {
+          try {
+            sessionStorage.setItem(
+              'jsonrock_pending_share_settings',
+              JSON.stringify(options.pendingSettings)
+            )
+          } catch (e) {
+            console.warn('SessionStorage write failed', e)
+          }
+        }
       }
 
-      setIsShareModalOpen(false)
-      setToastState({ isOpen: true, message })
-    } catch (e) {
-      console.error(e)
-      triggerAlert('Share Failed', (e as Error).message, 'error')
-    } finally {
-      setIsAutoSaving(false)
+      if (options?.pendingOpenModal) {
+        pendingOpenShareModalRef.current = true
+        if (typeof window !== 'undefined') {
+          try {
+            sessionStorage.setItem('jsonrock_pending_open_share_modal', 'true')
+          } catch (e) {
+            console.warn('SessionStorage write failed', e)
+          }
+        }
+      }
+
+      try {
+        openSignIn({
+          fallbackRedirectUrl: currentUrl,
+          signUpFallbackRedirectUrl: currentUrl,
+          forceRedirectUrl: currentUrl,
+          signUpForceRedirectUrl: currentUrl,
+        })
+      } catch (e) {
+        console.warn('Clerk openSignIn modal failed:', e)
+      }
+    },
+    [openSignIn]
+  )
+
+  const handleShareDocument = useCallback(
+    async (settings: {
+      accessLevel: ShareAccessType
+      isPrivateLink: boolean
+      sharePassword?: string
+    }) => {
+      if (
+        settings.isPrivateLink &&
+        (!settings.sharePassword || settings.sharePassword.length < 4)
+      ) {
+        triggerAlert(
+          'Invalid Password',
+          'Password must be at least 4 characters.',
+          'error'
+        )
+        return
+      }
+
+      // If user is not authenticated, preserve share settings and trigger Clerk sign-in modal
+      if (!isSignedIn) {
+        openAuthModal({ pendingSettings: settings })
+        return
+      }
+
+      pendingShareSettingsRef.current = null
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('jsonrock_pending_share_settings')
+        sessionStorage.removeItem('jsonrock_pending_open_share_modal')
+      }
+      await executeShareDocument(settings)
+    },
+    [isSignedIn, openAuthModal, executeShareDocument]
+  )
+
+  const handleOpenShareModal = useCallback(
+    (open: boolean) => {
+      if (open && !isSignedIn) {
+        openAuthModal({ pendingOpenModal: true })
+        return
+      }
+      setIsShareModalOpen(open)
+    },
+    [isSignedIn, openAuthModal]
+  )
+
+  // Automatically resume the share operation or open modal once sign-in/sign-up completes
+  useEffect(() => {
+    if (isSignedIn) {
+      let pendingSettings = pendingShareSettingsRef.current
+      let pendingOpenModal = pendingOpenShareModalRef.current
+
+      // Retrieve from sessionStorage if state was lost during OAuth redirect
+      if (!pendingSettings && typeof window !== 'undefined') {
+        try {
+          const stored = sessionStorage.getItem(
+            'jsonrock_pending_share_settings'
+          )
+          if (stored) {
+            pendingSettings = JSON.parse(stored)
+          }
+        } catch (e) {
+          console.warn(
+            'Failed to parse pending share settings from sessionStorage',
+            e
+          )
+        }
+      }
+
+      if (!pendingOpenModal && typeof window !== 'undefined') {
+        try {
+          const storedModal = sessionStorage.getItem(
+            'jsonrock_pending_open_share_modal'
+          )
+          if (storedModal === 'true') {
+            pendingOpenModal = true
+          }
+        } catch (e) {
+          console.warn(
+            'Failed to parse pending open share modal from sessionStorage',
+            e
+          )
+        }
+      }
+
+      if (pendingSettings) {
+        pendingShareSettingsRef.current = null
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('jsonrock_pending_share_settings')
+          sessionStorage.removeItem('jsonrock_pending_open_share_modal')
+        }
+        executeShareDocument(pendingSettings)
+      } else if (pendingOpenModal) {
+        pendingOpenShareModalRef.current = false
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('jsonrock_pending_open_share_modal')
+          sessionStorage.removeItem('jsonrock_pending_share_settings')
+        }
+        setIsShareModalOpen(true)
+      }
     }
-  }
+  }, [isSignedIn, executeShareDocument])
 
   // Debounce the input to avoid thrashing the worker
   const debouncedJsonContent = useDebounce(currentJsonContent, 500)
@@ -1232,14 +1774,11 @@ export default function Home({
       return
     }
 
-    // Try a standard JSON.parse just to check validity and catch syntax errors fast,
-    // but don't store the result! Only the worker stores the tree.
     try {
       const parsed = JSON.parse(debouncedJsonContent)
       setParsedJsonData(parsed)
       setIsJsonValid(true)
       setJsonValidationError(null)
-      // Send to worker for heavy processing
       processJson(debouncedJsonContent)
     } catch (e) {
       setIsJsonValid(false)
@@ -1263,7 +1802,6 @@ export default function Home({
         layoutOptions,
       } = workerState.result
 
-      // Tree view data is ready immediately (virtualized, flat list)
       setTreeNodes(newTreeNodes)
 
       if (rfNodes.length > 1000) {
@@ -1273,7 +1811,6 @@ export default function Home({
         setIsLayoutCalculating(false)
       } else {
         setIsGraphTooLarge(false)
-        // Graph view needs ELK layout run on the un-positioned nodes
         if (currentViewMode === 'visualize') {
           setIsLayoutCalculating(true)
           applyElkLayout(
@@ -1288,10 +1825,6 @@ export default function Home({
             setIsLayoutCalculating(false)
           })
         } else {
-          // If we're not in graph mode, we don't strictly need to run ELK,
-          // but we can save the unpositioned nodes just in case they switch back.
-          // Running it lazy on switch requires keeping the worker result in state,
-          // so for now we'll just let the switch re-trigger the worker if needed.
           setGraphNodes([])
           setGraphEdges([])
         }
@@ -1300,10 +1833,8 @@ export default function Home({
   }, [workerState, currentViewMode])
 
   const handleEditorValidation = useCallback((markers: any[]) => {
-    // Monaco MarkerSeverity: 8 = Error, 4 = Warning
     const issues = markers.filter((m) => m.severity >= 4)
     if (issues.length > 0) {
-      // Sort so errors (8) come before warnings (4)
       const highestIssue = issues.sort((a, b) => b.severity - a.severity)[0]
       setMonacoValidationError({
         message: highestIssue.message,
@@ -1320,7 +1851,6 @@ export default function Home({
 
   // Auto-Save Effect
   useEffect(() => {
-    // Auto-save in Text or JSON Mode, if editable, and has slug
     if (
       (documentType === 'text' ||
         documentType === 'json' ||
@@ -1331,11 +1861,9 @@ export default function Home({
       !isPasswordLocked &&
       (documentType !== 'json' || isJsonValid)
     ) {
-      // Check if content actually changed from last save
       if (debouncedContentForAutoSave === lastPersistedContentRef.current)
         return
 
-      // Prevent double calls or saving while already saving (though guard handles it)
       handleSaveDocument(true)
     }
   }, [
@@ -1347,10 +1875,9 @@ export default function Home({
     isJsonValid,
   ])
 
-  // Auto-Create Effect: When no slug exists and user edits default content, auto-create a document
+  // Auto-Create Effect: When no slug exists and user edits default content, auto-create an encrypted document
   const isAutoCreatingRef = React.useRef(false)
   useEffect(() => {
-    // Only trigger if: no slug, content differs from default, not empty, not already creating
     if (
       !documentSlug &&
       debouncedContentForAutoSave !== lastPersistedContentRef.current &&
@@ -1360,19 +1887,29 @@ export default function Home({
     ) {
       isAutoCreatingRef.current = true
       const targetType = documentType
-      const isText = targetType === 'text'
-      fetch('/api/share', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          json: debouncedContentForAutoSave,
-          mode: currentViewMode, // Save the actual current view mode, not forced "formatter"
-          type: targetType,
-          accessType: 'editor',
-        }),
-      })
-        .then((res) => res.json())
-        .then((data) => {
+
+      ;(async () => {
+        try {
+          const { key, keyString } = await getOrCreateDocumentKey()
+          const { ciphertext, iv } = await encryptContent(
+            debouncedContentForAutoSave,
+            key
+          )
+          encryptedPayloadRef.current = { ciphertext, iv }
+
+          const res = await fetch('/api/share', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ciphertext,
+              iv,
+              mode: currentViewMode,
+              type: targetType,
+              accessType: 'editor',
+              isPrivate: false,
+            }),
+          })
+          const data = await res.json()
           if (data.slug) {
             setDocumentSlug(data.slug)
             setUserAccessLevel(data.accessType || 'editor')
@@ -1382,7 +1919,7 @@ export default function Home({
             addOwnership(data.slug)
             lastPersistedContentRef.current = debouncedContentForAutoSave
 
-            const resolvedType = (data.type || documentType) as ShareType
+            const resolvedType = (data.type || targetType) as ShareType
             const route = `${getEditorBasePath(resolvedType)}/`
             const viewParam =
               resolvedType === 'text' ||
@@ -1390,10 +1927,8 @@ export default function Home({
               resolvedType === 'html'
                 ? ''
                 : `?view=${currentViewMode}`
-            const newUrl = `${route}${data.slug}${viewParam}`
+            const newUrl = `${route}${data.slug}${viewParam}#key=${keyString}`
 
-            // Use window.history.replaceState instead of router.replace
-            // router.replace causes a Next.js server-side navigation which may 404 because the DB isn't updated instantly causing a redirect to /editor
             justAutoSavedSlugRef.current = data.slug
             window.history.replaceState(
               { ...window.history.state, as: newUrl, url: newUrl },
@@ -1401,13 +1936,21 @@ export default function Home({
               newUrl
             )
           }
-        })
-        .catch((e) => console.error('Auto-create failed', e))
-        .finally(() => {
+        } catch (e) {
+          console.error('Auto-create failed', e)
+        } finally {
           isAutoCreatingRef.current = false
-        })
+        }
+      })()
     }
-  }, [debouncedContentForAutoSave, documentSlug, documentType, isJsonValid])
+  }, [
+    debouncedContentForAutoSave,
+    documentSlug,
+    documentType,
+    isJsonValid,
+    currentViewMode,
+    getOrCreateDocumentKey,
+  ])
 
   const handleCopy = () => {
     // Copy the formatted output, not the input, if we are in format tab
@@ -1481,10 +2024,36 @@ export default function Home({
           onOpenUploadModal={setIsUploadModalOpen}
           onCreateNewDocument={handleCreateNewDocument}
           isAutoSaving={isAutoSaving}
-          onOpenShareModal={setIsShareModalOpen}
+          onOpenShareModal={handleOpenShareModal}
           onOpenHistoryModal={openHistoryModal}
           currentViewMode={currentViewMode}
         />
+
+        {/* Legacy Document Migration Notice Banner */}
+        {showMigrationBanner && (
+          <div className='bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 text-xs text-amber-800 dark:text-amber-300 flex items-center justify-between gap-3 shrink-0 z-20'>
+            <div className='flex items-center gap-2 min-w-0'>
+              <AlertTriangle
+                size={15}
+                className='shrink-0 text-amber-600 dark:text-amber-400'
+              />
+              <span className='truncate sm:whitespace-normal'>
+                <strong>Upgrade Notice:</strong> This document is stored in
+                legacy plaintext. When you edit and save changes, it will be
+                automatically upgraded to End-to-End Encryption. Anyone with the
+                current link will need the new link (generated upon saving) to
+                view this content.
+              </span>
+            </div>
+            <button
+              onClick={() => setShowMigrationBanner(false)}
+              className='p-1 hover:bg-amber-500/20 rounded transition-colors text-amber-800 dark:text-amber-300 shrink-0'
+              title='Dismiss notice'
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {/* Split View */}
         <main className='flex-1 flex flex-col lg:flex-row overflow-hidden relative'>
@@ -1991,8 +2560,64 @@ export default function Home({
         </div>
       )}
 
+      {/* Decryption Error Modal */}
+      {decryptionError && (
+        <div
+          className={cn(
+            'fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm p-4',
+            documentType === 'text'
+              ? 'bg-white/80'
+              : 'bg-white/80 dark:bg-black/80'
+          )}
+        >
+          <div
+            className={cn(
+              'w-full max-w-md space-y-4 rounded-xl border p-6 shadow-2xl animate-in zoom-in-95',
+              documentType === 'text'
+                ? 'bg-white border-red-200'
+                : 'bg-white dark:bg-zinc-950 border-red-200 dark:border-red-900/40'
+            )}
+          >
+            <div className='flex flex-col items-center gap-2 text-center'>
+              <div className='flex h-12 w-12 items-center justify-center rounded-full border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/40 text-red-500'>
+                <Lock size={20} />
+              </div>
+              <h2
+                className={cn(
+                  'text-lg font-semibold',
+                  documentType === 'text'
+                    ? 'text-zinc-900'
+                    : 'text-zinc-900 dark:text-zinc-100'
+                )}
+              >
+                Decryption Failed
+              </h2>
+              <p
+                className={cn(
+                  'text-sm leading-relaxed',
+                  documentType === 'text'
+                    ? 'text-zinc-600'
+                    : 'text-zinc-600 dark:text-zinc-400'
+                )}
+              >
+                {decryptionError}
+              </p>
+            </div>
+
+            <div className='pt-2 flex flex-col gap-2'>
+              <button
+                onClick={() => router.push('/editor')}
+                className='w-full rounded-lg bg-zinc-900 dark:bg-zinc-100 px-3 py-2 text-sm font-medium text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors'
+              >
+                Create New Document
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Unlock Modal */}
-      {isPasswordLocked && (
+      {isPasswordLocked && !decryptionError && (
         <div
           className={cn(
             'fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm p-4',
@@ -2127,6 +2752,15 @@ export default function Home({
         isPrivacyLocked={isPrivacyLocked}
         onSaveShareSettings={handleShareDocument}
         isSavingSettings={isAutoSaving}
+        shareUrl={
+          typeof window !== 'undefined' && documentSlug
+            ? `${window.location.origin}${getEditorBasePath(documentType)}/${documentSlug}${
+                isDocumentPrivate
+                  ? ''
+                  : `#key=${activeKeyStringRef.current || (typeof window !== 'undefined' ? extractKeyFromFragment() || '' : '')}`
+              }`
+            : ''
+        }
         forceLightMode={documentType === 'text'}
       />
     </div>

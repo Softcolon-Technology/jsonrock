@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import { ShareService } from '../services/share.service'
 import logger from '../config/logger'
 import { ShareTypeEnum, ModeEnum, AccessTypeEnum } from '../enums/enum'
+import { AuthenticatedRequest } from '../middlewares/auth.middleware'
 
 const shareService = new ShareService()
 
@@ -11,28 +12,46 @@ interface MulterRequest extends Request {
 }
 
 export class ShareController {
-  async createShare(req: Request, res: Response): Promise<void> {
+  async createShare(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      // All validation is handled by Joi middleware
-      const { json, mode, isPrivate, accessType, password, type, slug } =
-        req.body
+      const {
+        schemaVersion,
+        ciphertext,
+        iv,
+        salt,
+        mode,
+        isPrivate,
+        accessType,
+        type,
+        slug,
+      } = req.body
+
+      const ownerId = req.auth?.userId
 
       const record = await shareService.createShareLink({
-        json: json || '',
-        mode,
+        ownerId,
+        schemaVersion: schemaVersion ?? 2,
+        ciphertext: ciphertext || '',
+        iv: iv || '',
+        salt: salt || undefined,
+        mode: mode || ModeEnum.FORMATTER,
         isPrivate: isPrivate || false,
-        accessType,
-        password,
+        accessType: accessType || AccessTypeEnum.VIEWER,
         type: type || ShareTypeEnum.JSON,
         slug,
       })
 
       res.json({
         slug: record.slug,
+        ownerId: record.ownerId,
+        schemaVersion: record.schemaVersion ?? 2,
         mode: record.mode,
         type: record.type,
         isPrivate: record.isPrivate,
         accessType: record.accessType,
+        ciphertext: record.ciphertext,
+        iv: record.iv,
+        salt: record.salt,
       })
     } catch (error) {
       logger.error('Error creating share link', error)
@@ -42,7 +61,6 @@ export class ShareController {
 
   async getRawShare(req: Request, res: Response): Promise<void> {
     try {
-      // Validation handled by Joi middleware
       const { slug } = req.params
       const password = req.query.password as string | undefined
 
@@ -53,25 +71,59 @@ export class ShareController {
         return
       }
 
-      // check password if private
-      if (record.isPrivate) {
-        if (!password) {
-          res.status(401).json({ error: 'Password is required' })
-          return
+      const isLegacy =
+        !record.schemaVersion ||
+        record.schemaVersion === 1 ||
+        (Boolean(record.json) && !record.ciphertext)
+
+      if (isLegacy) {
+        if (record.isPrivate) {
+          if (!password) {
+            res.status(401).json({ error: 'Password is required' })
+            return
+          }
+          const isValid = shareService.verifyLegacyPassword(record, password)
+          if (!isValid) {
+            res.status(401).json({ error: 'Password is incorrect' })
+            return
+          }
         }
 
-        const isValid = shareService.verifyPassword(record, password)
-        if (!isValid) {
-          res.status(401).json({ error: 'Password is incorrect' })
-          return
+        let parsedData = record.json
+        if (record.type === ShareTypeEnum.JSON && record.json) {
+          try {
+            parsedData = JSON.parse(record.json)
+          } catch {
+            parsedData = record.json
+          }
         }
+
+        res.json({
+          slug: record.slug,
+          schemaVersion: 1,
+          isLegacyPlaintext: true,
+          data: parsedData,
+          json: record.json,
+          type: record.type,
+          mode: record.mode,
+          isPrivate: record.isPrivate,
+          accessType: record.accessType,
+        })
+        return
       }
 
-      res.json(
-        record.type === ShareTypeEnum.JSON
-          ? JSON.parse(record.json)
-          : record.json
-      )
+      res.json({
+        slug: record.slug,
+        schemaVersion: record.schemaVersion ?? 2,
+        isLegacyPlaintext: false,
+        ciphertext: record.ciphertext,
+        iv: record.iv,
+        salt: record.salt,
+        type: record.type,
+        mode: record.mode,
+        isPrivate: record.isPrivate,
+        accessType: record.accessType,
+      })
     } catch (error) {
       logger.error('API Error:', error)
       res.status(500).json({ error: 'Internal Server Error' })
@@ -80,7 +132,6 @@ export class ShareController {
 
   async getShareMetaData(req: Request, res: Response): Promise<void> {
     try {
-      // Validation handled by Joi middleware
       const { slug } = req.params
 
       const record = await shareService.getShareLink(slug as string)
@@ -90,28 +141,61 @@ export class ShareController {
         return
       }
 
-      if (record.isPrivate) {
+      const isLegacy =
+        !record.schemaVersion ||
+        record.schemaVersion === 1 ||
+        (Boolean(record.json) && !record.ciphertext)
+
+      if (isLegacy) {
+        if (record.isPrivate) {
+          res.json({
+            type: record.type,
+            data: null,
+            json: '',
+            slug: record.slug,
+            isPrivate: true,
+            accessType: record.accessType,
+            mode: record.mode,
+            schemaVersion: 1,
+            isLegacyPlaintext: true,
+          })
+          return
+        }
+
+        let parsedData = record.json
+        if (record.type === ShareTypeEnum.JSON && record.json) {
+          try {
+            parsedData = JSON.parse(record.json)
+          } catch {
+            parsedData = record.json
+          }
+        }
+
         res.json({
-          data: null,
           type: record.type,
+          data: parsedData,
+          json: record.json,
           slug: record.slug,
-          isPrivate: true,
+          isPrivate: record.isPrivate,
           accessType: record.accessType,
           mode: record.mode,
+          schemaVersion: 1,
+          isLegacyPlaintext: true,
         })
         return
       }
 
       res.json({
         type: record.type,
-        data:
-          record.type === ShareTypeEnum.JSON
-            ? JSON.parse(record.json)
-            : record.json,
+        ciphertext: record.ciphertext,
+        iv: record.iv,
+        salt: record.salt,
         slug: record.slug,
         isPrivate: record.isPrivate,
         accessType: record.accessType,
         mode: record.mode,
+        schemaVersion: record.schemaVersion ?? 2,
+        isLegacyPlaintext: false,
       })
     } catch (error) {
       logger.error('API Error:', error)
@@ -121,7 +205,6 @@ export class ShareController {
 
   async unlockShare(req: Request, res: Response): Promise<void> {
     try {
-      // Validation handled by Joi middleware
       const { slug } = req.params
       const { password } = req.body
 
@@ -131,38 +214,78 @@ export class ShareController {
         return
       }
 
-      const isValid = shareService.verifyPassword(record, password)
-      if (!isValid) {
-        res.status(401).json({ error: 'Invalid password' })
+      const isLegacy =
+        !record.schemaVersion ||
+        record.schemaVersion === 1 ||
+        (Boolean(record.json) && !record.ciphertext)
+
+      if (isLegacy) {
+        const isValid = shareService.verifyLegacyPassword(record, password)
+        if (!isValid) {
+          res.status(401).json({ error: 'Invalid password' })
+          return
+        }
+
+        let parsedData = record.json
+        if (record.type === ShareTypeEnum.JSON && record.json) {
+          try {
+            parsedData = JSON.parse(record.json)
+          } catch {
+            parsedData = record.json
+          }
+        }
+
+        res.json({
+          type: record.type,
+          data: parsedData,
+          json: record.json,
+          slug: record.slug,
+          isPrivate: record.isPrivate,
+          accessType: record.accessType,
+          mode: record.mode,
+          schemaVersion: 1,
+          isLegacyPlaintext: true,
+        })
         return
       }
 
+      // If document is already E2EE (v2), unlocking happens client-side
       res.json({
         type: record.type,
-        data:
-          record.type === ShareTypeEnum.JSON
-            ? JSON.parse(record.json)
-            : record.json,
+        ciphertext: record.ciphertext,
+        iv: record.iv,
+        salt: record.salt,
         slug: record.slug,
         isPrivate: record.isPrivate,
         accessType: record.accessType,
         mode: record.mode,
+        schemaVersion: 2,
+        isLegacyPlaintext: false,
       })
     } catch (error) {
-      logger.error('Unknown error:', error)
+      logger.error('Unlock error:', error)
       res.status(500).json({ error: 'Internal Server Error' })
     }
   }
 
-  async updateShare(req: Request, res: Response): Promise<void> {
+  async updateShare(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      // Validation handled by Joi middleware
       const { slug } = req.params
-      const { json, mode, isPrivate, accessType, password, type } = req.body
+      const {
+        schemaVersion,
+        ciphertext,
+        iv,
+        salt,
+        mode,
+        isPrivate,
+        accessType,
+        type,
+      } = req.body
+
+      const ownerId = req.auth?.userId
 
       const existing = await shareService.getShareLink(slug as string)
       if (existing) {
-        // Business logic validation
         if (existing.isPrivate && !isPrivate) {
           res
             .status(400)
@@ -171,28 +294,45 @@ export class ShareController {
         }
 
         await shareService.updateShareLink(slug as string, {
-          json: json || '',
+          ownerId: ownerId || existing.ownerId,
+          schemaVersion: schemaVersion ?? 2,
+          ciphertext,
+          iv,
+          salt: salt !== undefined ? salt : existing.salt,
           mode,
           isPrivate: isPrivate || false,
           accessType,
-          password,
           type: type || ShareTypeEnum.JSON,
         })
-        res.json({ success: true, slug })
+        res.json({
+          success: true,
+          slug,
+          schemaVersion: 2,
+          ownerId: ownerId || existing.ownerId,
+        })
         return
       }
 
       // Upsert / Create if not exists (fallback)
-      await shareService.createShareLink({
+      const created = await shareService.createShareLink({
         slug: slug as string,
-        json: json || '',
-        mode,
+        ownerId,
+        schemaVersion: schemaVersion ?? 2,
+        ciphertext: ciphertext || '',
+        iv: iv || '',
+        salt,
+        mode: mode || ModeEnum.FORMATTER,
         isPrivate: isPrivate || false,
         accessType: accessType || AccessTypeEnum.EDITOR,
-        password,
         type: type || ShareTypeEnum.JSON,
       })
-      res.json({ success: true, slug, created: true })
+      res.json({
+        success: true,
+        slug,
+        created: true,
+        schemaVersion: 2,
+        ownerId: created.ownerId,
+      })
     } catch (error) {
       logger.error('API Error:', error)
       res.status(500).json({ error: 'Internal Server Error' })
@@ -208,7 +348,6 @@ export class ShareController {
         return
       }
 
-      // size check handled by multer limits, but safe double check
       if (file.size > 2 * 1024 * 1024) {
         res.status(413).json({ error: 'File size exceeds 2MB limit' })
         return
@@ -221,25 +360,21 @@ export class ShareController {
         file.originalname?.toLowerCase().endsWith('.mdx') ||
         file.mimetype === 'text/markdown'
 
-      // Validate JSON only if it's not a markdown file
-      if (!isMarkdown) {
-        try {
-          JSON.parse(text)
-        } catch {
-          res.status(400).json({ error: 'Invalid JSON file' })
-          return
-        }
-      }
+      const uploadType = isMarkdown
+        ? ShareTypeEnum.MARKDOWN
+        : ShareTypeEnum.JSON
 
       const record = await shareService.createShareLink({
-        json: text,
-        mode: ModeEnum.VISUALIZE, // Default or could be inferred
+        schemaVersion: 2,
+        ciphertext: text,
+        iv: '',
+        mode: ModeEnum.VISUALIZE,
         isPrivate: false,
         accessType: AccessTypeEnum.EDITOR,
-        type: isMarkdown ? ShareTypeEnum.MARKDOWN : ShareTypeEnum.JSON,
+        type: uploadType,
       })
 
-      res.json({ slug: record.slug })
+      res.json({ slug: record.slug, schemaVersion: 2 })
     } catch (error) {
       console.error('Upload API Error:', error)
       res.status(500).json({ error: 'Internal Server Error' })

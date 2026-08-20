@@ -31,15 +31,19 @@ export default async function EditorTextSlugPage({ params }: Props) {
     if (res.ok) {
       const data = await res.json()
 
-      // Backend returns { data, type, slug, isPrivate, accessType, mode }
       initialRecord = {
         slug: data.slug,
         type: data.type || 'text',
-        json: data.isPrivate
-          ? ''
-          : typeof data.data === 'string'
+        schemaVersion: data.schemaVersion || (data.isLegacyPlaintext ? 1 : 2),
+        isLegacyPlaintext: data.isLegacyPlaintext || false,
+        json: data.isLegacyPlaintext
+          ? typeof data.data === 'string'
             ? data.data
-            : JSON.stringify(data.data),
+            : JSON.stringify(data.data)
+          : data.json || '',
+        ciphertext: data.ciphertext || '',
+        iv: data.iv || '',
+        salt: data.salt || undefined,
         mode: data.mode || 'visualize',
         isPrivate: data.isPrivate || false,
         accessType: data.accessType || 'editor',

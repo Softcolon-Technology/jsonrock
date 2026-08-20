@@ -23,7 +23,7 @@ export default function Footer() {
 
           <div className='flex items-center space-x-4 md:space-x-6 text-[#333333]'>
             <Link
-              href='https://www.instagram.com/softcolon/'
+              href='https://www.instagram.com/softcolon_technologies/'
               target='_blank'
               rel='noopener noreferrer'
             >
