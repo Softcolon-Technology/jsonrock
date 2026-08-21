@@ -18,6 +18,7 @@ import {
   Loader2,
   Eye,
   EyeOff,
+  PanelLeftOpen,
 } from 'lucide-react'
 
 import { getJsonParseError } from '@/lib/json-error'
@@ -40,6 +41,11 @@ const GraphView = dynamic(() => import('../components/GraphView'), {
 const TreeExplorer = dynamic(() => import('../components/TreeExplorer'), {
   ssr: false,
 })
+
+/** Stable Monaco options — recreating this object every render can dispose Monaco mid-update. */
+const JSON_EDITOR_INPUT_OPTIONS = {
+  padding: { top: 16, bottom: 100 },
+} as const
 import { getLayoutedElements, applyElkLayout } from '@/lib/graph-layout'
 import { useJsonWorker, TreeNodeSlim } from '@/hooks/useJsonWorker'
 import { cn } from '@/lib/utils'
@@ -54,6 +60,7 @@ import {
   listLocalDocuments,
   LocalDocumentRecord,
   saveLocalDocument,
+  updateLocalDocumentTitle,
 } from '@/lib/local-docs'
 
 const RichTextEditor = dynamic(() => import('../components/RichTextEditor'), {
@@ -201,13 +208,6 @@ export default function Home({
   const { isSignedIn, isLoaded: isUserLoaded } = useUser()
   const { getToken, isLoaded: isAuthLoaded } = useAuth()
   const { openSignIn } = useClerk()
-  // [AUTH-DEBUG] TEMP — remove after diagnosing stuck auth-loading
-  console.log('[AUTH-DEBUG] editor-page render', {
-    isUserLoaded,
-    isAuthLoaded,
-    isSignedIn,
-    hasPublishableKey: Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY),
-  })
   const pendingShareSettingsRef = React.useRef<{
     accessLevel: ShareAccessType
     isPrivateLink: boolean
@@ -881,6 +881,30 @@ export default function Home({
     }
   }, [])
 
+  const handleRenameLocalDocument = useCallback(
+    async (slug: string, title: string) => {
+      try {
+        const updated = await updateLocalDocumentTitle(slug, title)
+        if (!updated) return null
+
+        setLocalDocuments((previous) => {
+          const remaining = previous.filter(
+            (item) => item.slug !== updated.slug
+          )
+          return [updated, ...remaining].sort(
+            (a, b) => b.updatedAt - a.updatedAt
+          )
+        })
+
+        return updated
+      } catch (error) {
+        console.error('Failed to rename local document', error)
+        return null
+      }
+    },
+    []
+  )
+
   const handleClearLocalDocuments = useCallback(async () => {
     try {
       await clearLocalDocuments()
@@ -1283,11 +1307,17 @@ export default function Home({
   const [editorPanelWidthPercentage, setEditorPanelWidthPercentage] =
     useState(40) // Default 40%
   const [isResizingPanel, setIsResizingPanel] = useState(false)
+  /** Collapse the left JSON input pane; right preview stays visible. */
+  const [isLeftEditorCollapsed, setIsLeftEditorCollapsed] = useState(false)
 
-  const startResizing = useCallback((mouseDownEvent: React.MouseEvent) => {
-    mouseDownEvent.preventDefault()
-    setIsResizingPanel(true)
-  }, [])
+  const startResizing = useCallback(
+    (mouseDownEvent: React.MouseEvent) => {
+      mouseDownEvent.preventDefault()
+      if (isLeftEditorCollapsed) return
+      setIsResizingPanel(true)
+    },
+    [isLeftEditorCollapsed]
+  )
 
   const stopResizing = useCallback(() => {
     setIsResizingPanel(false)
@@ -1295,7 +1325,7 @@ export default function Home({
 
   const resize = useCallback(
     (mouseMoveEvent: MouseEvent) => {
-      if (isResizingPanel) {
+      if (isResizingPanel && !isLeftEditorCollapsed) {
         const newWidth = (mouseMoveEvent.clientX / window.innerWidth) * 100
         // Constraint between 20% and 80%
         if (newWidth > 20 && newWidth < 80) {
@@ -1303,7 +1333,7 @@ export default function Home({
         }
       }
     },
-    [isResizingPanel]
+    [isResizingPanel, isLeftEditorCollapsed]
   )
 
   useEffect(() => {
@@ -2018,6 +2048,11 @@ export default function Home({
     }
   }, [currentJsonContent, indentationSize, documentType, isJsonValid])
 
+  const formatterRemoteValue = React.useMemo(
+    () => ({ code: formattedOutput, nonce: 1 }),
+    [formattedOutput]
+  )
+
   // Mobile specific view state
   const [mobileTab, setMobileTab] = useState<'editor' | 'viewer'>('editor')
 
@@ -2078,158 +2113,160 @@ export default function Home({
 
         {/* Split View */}
         <main className='flex-1 flex flex-col lg:flex-row overflow-hidden relative'>
-          {/* Editor Pane (Left/Top) */}
-          <div
-            style={
-              {
-                '--left-panel-width': `${editorPanelWidthPercentage}%`,
-              } as React.CSSProperties
-            }
-            className={cn(
-              'border-b lg:border-b-0 lg:border-r border-zinc-200 flex flex-col bg-white h-full min-h-0',
-              documentType === 'json' &&
-                'dark:border-zinc-900 dark:bg-[#09090b]',
-              documentType !== 'json'
-                ? 'w-full'
-                : 'w-full lg:w-(--left-panel-width) lg:min-w-75',
-              // Mobile visibility toggle
-              // Mobile visibility toggle
-              mobileTab === 'editor' ? 'flex' : 'hidden lg:flex'
-            )}
-          >
-            {documentType === 'text' ? (
-              <div className='flex-1 h-full relative'>
-                <RichTextEditor
-                  content={currentJsonContent}
-                  onChange={onJsonContentChange}
-                  readOnly={!hasEditPermission}
-                  remoteContent={syncedRemoteContent?.code}
-                  forceLightMode={true}
-                  isCurrentUserOwner={isCurrentUserOwner}
-                  slug={documentSlug}
-                />
-              </div>
-            ) : documentType === 'markdown' ? (
-              <div className='flex-1 h-full relative'>
-                <MarkdownEditor
-                  content={currentJsonContent}
-                  onChange={onJsonContentChange}
-                  readOnly={!hasEditPermission}
-                  onFileDrop={processSelectedFile}
-                  slug={documentSlug}
-                />
-              </div>
-            ) : documentType === 'html' ? (
-              <div className='flex-1 min-h-0 h-full relative overflow-hidden'>
-                <HtmlEditor
-                  content={currentJsonContent}
-                  onChange={onJsonContentChange}
-                  readOnly={!hasEditPermission}
-                  slug={documentSlug}
-                />
-              </div>
-            ) : (
-              <div className='flex-1 relative flex flex-col h-full'>
-                <div className='flex-1 relative'>
-                  <JsonEditor
-                    className='pt-14 lg:pt-0'
-                    defaultValue={currentJsonContent} // Initial Load Only
-                    remoteValue={syncedRemoteContent} // Updates Only
+          {/* Editor Pane (Left/Top) — unmount when collapsed (display:none crashes Monaco) */}
+          {!(documentType === 'json' && isLeftEditorCollapsed) && (
+            <div
+              style={
+                {
+                  '--left-panel-width': `${editorPanelWidthPercentage}%`,
+                } as React.CSSProperties
+              }
+              className={cn(
+                'border-b lg:border-b-0 lg:border-r border-zinc-200 flex flex-col bg-white h-full min-h-0',
+                documentType === 'json' &&
+                  'dark:border-zinc-900 dark:bg-[#09090b]',
+                documentType !== 'json'
+                  ? 'w-full'
+                  : 'w-full lg:w-(--left-panel-width) lg:min-w-75',
+                mobileTab === 'editor' ? 'flex' : 'hidden lg:flex'
+              )}
+            >
+              {documentType === 'text' ? (
+                <div className='flex-1 h-full relative'>
+                  <RichTextEditor
+                    content={currentJsonContent}
                     onChange={onJsonContentChange}
-                    onReady={() => setIsEditorReady(true)}
-                    onValidate={handleEditorValidation}
+                    readOnly={!hasEditPermission}
+                    remoteContent={syncedRemoteContent?.code}
+                    forceLightMode={true}
+                    isCurrentUserOwner={isCurrentUserOwner}
+                    slug={documentSlug}
+                  />
+                </div>
+              ) : documentType === 'markdown' ? (
+                <div className='flex-1 h-full relative'>
+                  <MarkdownEditor
+                    content={currentJsonContent}
+                    onChange={onJsonContentChange}
                     readOnly={!hasEditPermission}
                     onFileDrop={processSelectedFile}
                     slug={documentSlug}
-                    options={{
-                      padding: { top: 16, bottom: 100 }, // Ensure last lines are visible above floating alert
-                    }}
                   />
+                </div>
+              ) : documentType === 'html' ? (
+                <div className='flex-1 min-h-0 h-full relative overflow-hidden'>
+                  <HtmlEditor
+                    content={currentJsonContent}
+                    onChange={onJsonContentChange}
+                    readOnly={!hasEditPermission}
+                    slug={documentSlug}
+                  />
+                </div>
+              ) : (
+                <div className='flex-1 relative flex flex-col h-full'>
+                  <div className='flex-1 relative min-h-0'>
+                    <JsonEditor
+                      defaultValue={currentJsonContent} // Initial Load Only
+                      remoteValue={syncedRemoteContent} // Updates Only
+                      onChange={onJsonContentChange}
+                      onReady={() => setIsEditorReady(true)}
+                      onValidate={handleEditorValidation}
+                      readOnly={!hasEditPermission}
+                      onFileDrop={processSelectedFile}
+                      slug={documentSlug}
+                      showSidebarToggle
+                      isSidebarCollapsed={isLeftEditorCollapsed}
+                      onToggleSidebar={() => setIsLeftEditorCollapsed(true)}
+                      options={JSON_EDITOR_INPUT_OPTIONS}
+                    />
 
-                  {/* Error / Warning Alert Overlay */}
-                  {effectiveValidationError &&
-                    (!isDocValid ||
-                      effectiveValidationError.severity === 'warning') && (
-                      <div className='absolute bottom-4 left-4 right-4 lg:bottom-6 lg:left-8 lg:right-8 z-30 animate-in fade-in slide-in-from-bottom-2'>
-                        <div
-                          className={cn(
-                            'bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md p-3 lg:p-4 rounded-xl shadow-xl flex items-start gap-3 lg:gap-4 ring-1 ring-black/5 dark:ring-white/5 border',
-                            effectiveValidationError.severity === 'warning'
-                              ? 'border-amber-400 dark:border-amber-600/50'
-                              : 'border-red-200 dark:border-red-900/50'
-                          )}
-                        >
+                    {/* Error / Warning Alert Overlay */}
+                    {effectiveValidationError &&
+                      (!isDocValid ||
+                        effectiveValidationError.severity === 'warning') && (
+                        <div className='absolute bottom-4 left-4 right-4 lg:bottom-6 lg:left-8 lg:right-8 z-30 animate-in fade-in slide-in-from-bottom-2'>
                           <div
                             className={cn(
-                              'p-1.5 lg:p-2 rounded-lg shrink-0 shadow-sm border',
+                              'bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md p-3 lg:p-4 rounded-xl shadow-xl flex items-start gap-3 lg:gap-4 ring-1 ring-black/5 dark:ring-white/5 border',
                               effectiveValidationError.severity === 'warning'
-                                ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/30 text-amber-600 dark:text-amber-500'
-                                : 'bg-red-50 dark:bg-red-950/30 border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-500'
+                                ? 'border-amber-400 dark:border-amber-600/50'
+                                : 'border-red-200 dark:border-red-900/50'
                             )}
                           >
-                            <AlertCircle className='w-4 h-4 lg:w-5 lg:h-5' />
-                          </div>
-                          <div className='flex-1 min-w-0'>
-                            <div className='flex items-center justify-between gap-2 lg:gap-4'>
-                              <h4
-                                className={cn(
-                                  'text-xs lg:text-sm font-bold flex items-center gap-2',
-                                  effectiveValidationError.severity ===
-                                    'warning'
-                                    ? 'text-amber-800 dark:text-amber-400'
-                                    : 'text-zinc-900 dark:text-zinc-100'
-                                )}
-                              >
-                                {effectiveValidationError.severity === 'warning'
-                                  ? 'Warning'
-                                  : 'Invalid JSON'}
-                              </h4>
-                              {effectiveValidationError.line && (
-                                <span
-                                  className={cn(
-                                    'text-[10px] font-mono font-bold px-1.5 lg:px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm border',
-                                    effectiveValidationError.severity ===
-                                      'warning'
-                                      ? 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-900/50'
-                                      : 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-900/50'
-                                  )}
-                                >
-                                  Line {effectiveValidationError.line}
-                                </span>
-                              )}
-                            </div>
-                            <p
+                            <div
                               className={cn(
-                                'text-[11px] lg:text-xs mt-1 lg:mt-1.5 font-mono wrap-break-word leading-relaxed border-l-2 pl-2 lg:pl-3',
+                                'p-1.5 lg:p-2 rounded-lg shrink-0 shadow-sm border',
                                 effectiveValidationError.severity === 'warning'
-                                  ? 'text-amber-700 dark:text-amber-400/80 border-amber-300 dark:border-amber-700/50'
-                                  : 'text-zinc-600 dark:text-zinc-400 border-red-200 dark:border-red-900/50'
+                                  ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/30 text-amber-600 dark:text-amber-500'
+                                  : 'bg-red-50 dark:bg-red-950/30 border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-500'
                               )}
                             >
-                              {effectiveValidationError.message}
-                            </p>
+                              <AlertCircle className='w-4 h-4 lg:w-5 lg:h-5' />
+                            </div>
+                            <div className='flex-1 min-w-0'>
+                              <div className='flex items-center justify-between gap-2 lg:gap-4'>
+                                <h4
+                                  className={cn(
+                                    'text-xs lg:text-sm font-bold flex items-center gap-2',
+                                    effectiveValidationError.severity ===
+                                      'warning'
+                                      ? 'text-amber-800 dark:text-amber-400'
+                                      : 'text-zinc-900 dark:text-zinc-100'
+                                  )}
+                                >
+                                  {effectiveValidationError.severity ===
+                                  'warning'
+                                    ? 'Warning'
+                                    : 'Invalid JSON'}
+                                </h4>
+                                {effectiveValidationError.line && (
+                                  <span
+                                    className={cn(
+                                      'text-[10px] font-mono font-bold px-1.5 lg:px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm border',
+                                      effectiveValidationError.severity ===
+                                        'warning'
+                                        ? 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-900/50'
+                                        : 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-900/50'
+                                    )}
+                                  >
+                                    Line {effectiveValidationError.line}
+                                  </span>
+                                )}
+                              </div>
+                              <p
+                                className={cn(
+                                  'text-[11px] lg:text-xs mt-1 lg:mt-1.5 font-mono wrap-break-word leading-relaxed border-l-2 pl-2 lg:pl-3',
+                                  effectiveValidationError.severity ===
+                                    'warning'
+                                    ? 'text-amber-700 dark:text-amber-400/80 border-amber-300 dark:border-amber-700/50'
+                                    : 'text-zinc-600 dark:text-zinc-400 border-red-200 dark:border-red-900/50'
+                                )}
+                              >
+                                {effectiveValidationError.message}
+                              </p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                  {/* Go to View Button (Mobile Only) */}
-                  <div className='lg:hidden absolute top-2 right-14 z-20'>
-                    <button
-                      onClick={() => setMobileTab('viewer')}
-                      className='flex items-center gap-2 px-3 py-1.5 bg-emerald-600 text-white rounded-full shadow-lg shadow-emerald-900/20 font-medium text-xs hover:bg-emerald-500 transition-transform active:scale-95 backdrop-blur-sm opacity-90 hover:opacity-100'
-                    >
-                      Go to View
-                      <ArrowRight size={14} />
-                    </button>
+                    {/* Go to View Button (Mobile Only) */}
+                    <div className='lg:hidden absolute top-11 right-2 z-20'>
+                      <button
+                        onClick={() => setMobileTab('viewer')}
+                        className='flex items-center gap-2 px-3 py-1.5 bg-emerald-600 text-white rounded-full shadow-lg shadow-emerald-900/20 font-medium text-xs hover:bg-emerald-500 transition-transform active:scale-95 backdrop-blur-sm opacity-90 hover:opacity-100'
+                      >
+                        Go to View
+                        <ArrowRight size={14} />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           {/* Resizer Handle */}
-          {documentType === 'json' && (
+          {documentType === 'json' && !isLeftEditorCollapsed && (
             <div
               className={`hidden lg:flex w-1 bg-transparent cursor-col-resize z-40 items-center justify-center transition-colors`}
               onMouseDown={startResizing}
@@ -2238,7 +2275,7 @@ export default function Home({
             </div>
           )}
 
-          {/* View Pane (Right/Bottom) — only for JSON type */}
+          {/* View Pane (Right/Bottom) — only for JSON type; stays visible when left collapses */}
           <div
             style={
               {
@@ -2247,30 +2284,35 @@ export default function Home({
             }
             className={cn(
               'bg-gray-50 dark:bg-[#050505] relative overflow-hidden h-full',
-              'w-full lg:w-(--right-panel-width)',
-              // Mobile visibility toggle
-              mobileTab === 'viewer'
-                ? 'flex flex-col'
-                : documentType !== 'json'
-                  ? 'hidden'
-                  : 'hidden lg:flex lg:flex-col'
+              documentType !== 'json'
+                ? 'hidden'
+                : cn(
+                    isLeftEditorCollapsed
+                      ? 'w-full'
+                      : 'w-full lg:w-(--right-panel-width)',
+                    // Mobile tab switching
+                    mobileTab === 'viewer'
+                      ? 'flex flex-col'
+                      : 'hidden lg:flex lg:flex-col'
+                  )
             )}
           >
-            {/* Back to Editor Button (Mobile Only) */}
-            <div className='lg:hidden absolute top-2 right-10 z-70'>
-              <button
-                onClick={() => setMobileTab('editor')}
-                className='flex items-center gap-2 px-3 py-1.5 bg-zinc-800 dark:bg-zinc-700 text-white rounded-full shadow-lg font-medium text-xs hover:bg-zinc-700 dark:hover:bg-zinc-600 transition-transform active:scale-95 backdrop-blur-sm opacity-90 hover:opacity-100'
-              >
-                <Code2 size={14} />
-                Back to Editor
-              </button>
-            </div>
+            {/* Unified left icon rail — expand + view modes, centered on one axis */}
+            <div className='absolute top-3 left-3 z-50 flex w-9 flex-col items-center gap-3'>
+              {isLeftEditorCollapsed && (
+                <button
+                  type='button'
+                  onClick={() => setIsLeftEditorCollapsed(false)}
+                  title='Expand JSON editor'
+                  aria-label='Expand JSON editor'
+                  className='hidden lg:inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-zinc-200 bg-white text-emerald-600 shadow-lg backdrop-blur-sm hover:bg-emerald-50 hover:border-emerald-300 transition-colors dark:border-zinc-800 dark:bg-zinc-900 dark:text-emerald-400 dark:hover:bg-emerald-950/40 dark:hover:border-emerald-700'
+                >
+                  <PanelLeftOpen size={16} />
+                </button>
+              )}
 
-            {/* Navigation: Sidebar for Graph/Formatter/Tree */}
-            <div className='absolute top-4 left-4 z-50 flex flex-col gap-3'>
               {/* Formatter View Button */}
-              <div className='relative group'>
+              <div className='relative group flex h-9 w-9 shrink-0 items-center justify-center'>
                 <button
                   onClick={() => {
                     setCurrentViewMode('formatter')
@@ -2287,13 +2329,13 @@ export default function Home({
                     )
                   }}
                   className={cn(
-                    'p-2 rounded-full shadow-lg border backdrop-blur-sm transition-all duration-200',
+                    'inline-flex h-9 w-9 items-center justify-center rounded-full shadow-lg border backdrop-blur-sm transition-all duration-200',
                     currentViewMode === 'formatter'
-                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-emerald-900/20 scale-105'
-                      : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-200 hover:scale-105'
+                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-emerald-900/20'
+                      : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-200'
                   )}
                 >
-                  <Code2 size={18} />
+                  <Code2 size={16} />
                 </button>
                 <div className='absolute left-full top-1/2 -translate-y-1/2 ml-3 px-2 py-1 bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-200 text-xs font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-xl border border-zinc-800 dark:border-zinc-700'>
                   JSON Formatter
@@ -2301,7 +2343,7 @@ export default function Home({
               </div>
 
               {/* Graph View Button */}
-              <div className='relative group'>
+              <div className='relative group flex h-9 w-9 shrink-0 items-center justify-center'>
                 <button
                   onClick={() => {
                     setCurrentViewMode('visualize')
@@ -2318,22 +2360,21 @@ export default function Home({
                     )
                   }}
                   className={cn(
-                    'p-2 rounded-full shadow-lg border backdrop-blur-sm transition-all duration-200',
+                    'inline-flex h-9 w-9 items-center justify-center rounded-full shadow-lg border backdrop-blur-sm transition-all duration-200',
                     currentViewMode === 'visualize'
-                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-emerald-900/20 scale-105'
-                      : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-200 hover:scale-105'
+                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-emerald-900/20'
+                      : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-200'
                   )}
                 >
-                  <GitGraph size={18} />
+                  <GitGraph size={16} />
                 </button>
-                {/* Tooltip */}
                 <div className='absolute left-full top-1/2 -translate-y-1/2 ml-3 px-2 py-1 bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-200 text-xs font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-xl border border-zinc-800 dark:border-zinc-700'>
                   Graph View
                 </div>
               </div>
 
               {/* Tree View Button */}
-              <div className='relative group'>
+              <div className='relative group flex h-9 w-9 shrink-0 items-center justify-center'>
                 <button
                   onClick={() => {
                     setCurrentViewMode('tree')
@@ -2350,18 +2391,29 @@ export default function Home({
                     )
                   }}
                   className={cn(
-                    'p-2 rounded-full shadow-lg border backdrop-blur-sm transition-all duration-200',
+                    'inline-flex h-9 w-9 items-center justify-center rounded-full shadow-lg border backdrop-blur-sm transition-all duration-200',
                     currentViewMode === 'tree'
-                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-emerald-900/20 scale-105'
-                      : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-200 hover:scale-105'
+                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-emerald-900/20'
+                      : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-200'
                   )}
                 >
-                  <LayoutTemplate size={18} />
+                  <LayoutTemplate size={16} />
                 </button>
                 <div className='absolute left-full top-1/2 -translate-y-1/2 ml-3 px-2 py-1 bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-200 text-xs font-medium rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-xl border border-zinc-800 dark:border-zinc-700'>
                   Tree Explorer
                 </div>
               </div>
+            </div>
+
+            {/* Back to Editor Button (Mobile Only) */}
+            <div className='lg:hidden absolute top-2 right-10 z-70'>
+              <button
+                onClick={() => setMobileTab('editor')}
+                className='flex items-center gap-2 px-3 py-1.5 bg-zinc-800 dark:bg-zinc-700 text-white rounded-full shadow-lg font-medium text-xs hover:bg-zinc-700 dark:hover:bg-zinc-600 transition-transform active:scale-95 backdrop-blur-sm opacity-90 hover:opacity-100'
+              >
+                <Code2 size={14} />
+                Back to Editor
+              </button>
             </div>
             {/* Output Panel: only render after editor mounted and (if graph mode) layout is computed */}
             {isEditorReady &&
@@ -2475,7 +2527,7 @@ export default function Home({
                     <div className='flex-1 ml-16'>
                       <JsonEditor
                         defaultValue={formattedOutput}
-                        remoteValue={{ code: formattedOutput, nonce: 0 }}
+                        remoteValue={formatterRemoteValue}
                         onChange={() => {}}
                         readOnly={true}
                         className='rounded-none border-0 shadow-none'
@@ -2760,6 +2812,7 @@ export default function Home({
         onOpenDocument={handleOpenLocalDocument}
         onDeleteDocument={handleDeleteLocalDocument}
         onClearAll={handleClearLocalDocuments}
+        onRenameDocument={handleRenameLocalDocument}
         forceLightMode={documentType === 'text'}
       />
 
