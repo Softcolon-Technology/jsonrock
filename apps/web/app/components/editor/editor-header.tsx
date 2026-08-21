@@ -117,11 +117,6 @@ const EditorHeader = ({
   onOpenHistoryModal,
 }: Props) => {
   const { isSignedIn, isLoaded: isUserLoaded } = useUser()
-  // [AUTH-DEBUG] TEMP — remove after diagnosing stuck auth-loading
-  console.log('[AUTH-DEBUG] editor-header render', {
-    isUserLoaded,
-    isSignedIn,
-  })
   const [isPending, startTransition] = useTransition()
   const [isOtherOpen, setIsOtherOpen] = useState(false)
   const [visibleCount, setVisibleCount] = useState(HEADER_ACTIONS.length)
@@ -337,7 +332,7 @@ const EditorHeader = ({
         </div>
       </div>
 
-      {/* Left: logo only */}
+      {/* Left: logo */}
       <div
         ref={leftRef}
         className='flex items-center gap-2 sm:gap-3 z-10 min-w-0 shrink-0'
@@ -458,7 +453,9 @@ const EditorHeader = ({
         </button>
 
         <button
-          onClick={() => (!documentSlug || isAutoSaving ? undefined : onOpenShareModal(true))}
+          onClick={() =>
+            !documentSlug || isAutoSaving ? undefined : onOpenShareModal(true)
+          }
           disabled={!documentSlug || isAutoSaving}
           className={cn(
             'p-2 rounded-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:outline-none',

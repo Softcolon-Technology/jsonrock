@@ -12,7 +12,13 @@ export interface LocalDocumentRecord {
   isPrivate: boolean
   accessType: LocalDocumentAccessType
   updatedAt: number
+  /** Display title — local IndexedDB only, never sent to the server. */
   title: string
+  /**
+   * When true, auto-generation must not overwrite `title` on subsequent saves.
+   * Missing on older records — treat as false.
+   */
+  titleIsCustom: boolean
   preview: string
 }
 
@@ -28,8 +34,9 @@ interface SaveLocalDocumentInput {
 const DB_NAME = 'jsonrock-local-db'
 const DB_VERSION = 1
 const STORE_NAME = 'documents'
+const TITLE_MAX_LENGTH = 60
 
-const DEFAULT_TITLE: Record<LocalDocumentType, string> = {
+export const DEFAULT_DOCUMENT_TITLE: Record<LocalDocumentType, string> = {
   json: 'Untitled JSON',
   text: 'Untitled Text',
   markdown: 'Untitled Markdown',
@@ -74,120 +81,172 @@ function normalizePreview(content: string): string {
   return content.replace(/\s+/g, ' ').trim().slice(0, 180)
 }
 
-function deriveTitle(content: string, type: LocalDocumentType): string {
-  // ── JSON: parse and extract a meaningful title ──
+/** Cap stored titles at 60 chars; append "..." when truncated. */
+export function truncateDocumentTitle(title: string): string {
+  const trimmed = title.replace(/\s+/g, ' ').trim()
+  if (!trimmed) return ''
+  if (trimmed.length <= TITLE_MAX_LENGTH) return trimmed
+  return `${trimmed.slice(0, TITLE_MAX_LENGTH - 3)}...`
+}
+
+function stringifyScalar(value: unknown): string | null {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return null
+}
+
+/**
+ * Derive a display title from document content (local UI only).
+ * Result is already truncated to TITLE_MAX_LENGTH.
+ */
+export function deriveDocumentTitle(
+  content: string,
+  type: LocalDocumentType
+): string {
+  const fallback = DEFAULT_DOCUMENT_TITLE[type]
+
   if (type === 'json') {
     try {
       const parsed = JSON.parse(content.trim())
 
-      // Arrays → "Array (N items)"
       if (Array.isArray(parsed)) {
         if (parsed.length === 0) return 'Empty Array'
-        // Try to describe the first element
         const first = parsed[0]
         if (first && typeof first === 'object' && first !== null) {
           const keys = Object.keys(first)
-          return `Array (${parsed.length} items) — {${keys.slice(0, 3).join(', ')}}`
+          return truncateDocumentTitle(
+            `Array (${parsed.length} items) — {${keys.slice(0, 3).join(', ')}}`
+          )
         }
-        return `Array (${parsed.length} items)`
+        return truncateDocumentTitle(`Array (${parsed.length} items)`)
       }
 
-      // Objects → look for common "title-like" keys
       if (parsed && typeof parsed === 'object') {
-        const titleKeys = [
-          'title',
-          'name',
-          'label',
-          'heading',
-          'subject',
-          'id',
-          'key',
-          'slug',
-          'description',
-          'summary',
-        ]
-
-        for (const key of titleKeys) {
-          // Case-insensitive lookup
-          const match = Object.keys(parsed).find((k) => k.toLowerCase() === key)
-          if (match && parsed[match] != null) {
-            const val = parsed[match]
-            const str =
-              typeof val === 'string'
-                ? val
-                : typeof val === 'number' || typeof val === 'boolean'
-                  ? String(val)
-                  : null
-            if (str) return str.slice(0, 60)
+        // Prefer project → name → title (case-insensitive)
+        const preferredKeys = ['project', 'name', 'title']
+        for (const preferred of preferredKeys) {
+          const match = Object.keys(parsed).find(
+            (k) => k.toLowerCase() === preferred
+          )
+          if (match != null) {
+            const str = stringifyScalar(parsed[match])
+            if (str?.trim()) return truncateDocumentTitle(str)
           }
         }
 
-        // Fallback: show the first key-value pair
+        // Fallback: first scalar key-value pair ("project: JSON ROCK")
         const keys = Object.keys(parsed)
-        if (keys.length > 0) {
-          const firstKey = keys[0]!
-          const firstVal = parsed[firstKey]
-          if (
-            typeof firstVal === 'string' ||
-            typeof firstVal === 'number' ||
-            typeof firstVal === 'boolean'
-          ) {
-            return `${firstKey}: ${String(firstVal)}`.slice(0, 60)
+        for (const key of keys) {
+          const str = stringifyScalar(parsed[key])
+          if (str != null) {
+            return truncateDocumentTitle(`${key}: ${str}`)
           }
-          // If the value is complex, just show key count
-          return `{${keys.slice(0, 4).join(', ')}${keys.length > 4 ? ', …' : ''}}`
+        }
+
+        if (keys.length > 0) {
+          return truncateDocumentTitle(
+            `{${keys.slice(0, 4).join(', ')}${keys.length > 4 ? ', …' : ''}}`
+          )
         }
 
         return 'Empty Object'
       }
     } catch {
-      // Not valid JSON — fall through to first-line logic
+      // Not valid JSON — fall through
     }
-  }
 
-  // ── Markdown: strip heading markers ──
-  const firstLine = content
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => line.length > 0)
-
-  if (!firstLine) {
-    return DEFAULT_TITLE[type]
+    const firstLine = content
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.length > 0)
+    return firstLine ? truncateDocumentTitle(firstLine) : fallback
   }
 
   if (type === 'markdown') {
-    return firstLine.replace(/^#+\s*/, '').slice(0, 60) || DEFAULT_TITLE[type]
+    const heading = content
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => /^#+\s+/.test(line))
+    if (heading) {
+      const cleaned = heading.replace(/^#+\s+/, '').trim()
+      if (cleaned) return truncateDocumentTitle(cleaned)
+    }
+    return fallback
   }
 
   if (type === 'html') {
     const titleMatch = content.match(/<title[^>]*>([^<]*)<\/title>/i)
-    if (titleMatch?.[1]?.trim()) return titleMatch[1].trim().slice(0, 60)
-    return firstLine.replace(/<[^>]+>/g, '').slice(0, 60) || DEFAULT_TITLE[type]
+    if (titleMatch?.[1]?.trim()) {
+      return truncateDocumentTitle(titleMatch[1].trim())
+    }
+    const firstLine = content
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.length > 0)
+    if (firstLine) {
+      const text = firstLine.replace(/<[^>]+>/g, '').trim()
+      if (text) return truncateDocumentTitle(text)
+    }
+    return fallback
   }
 
-  // ── Text / fallback ──
-  return firstLine.slice(0, 60)
+  // Text: first non-empty line (strip tags — TipTap stores HTML)
+  const firstLine = content
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0)
+  if (!firstLine) return fallback
+  const text = firstLine.replace(/<[^>]+>/g, '').trim()
+  return text ? truncateDocumentTitle(text) : fallback
 }
 
-export async function saveLocalDocument(
-  input: SaveLocalDocumentInput
-): Promise<LocalDocumentRecord | null> {
-  if (!isIndexedDbAvailable() || !input.slug) {
-    return null
+function ensureRecordShape(
+  raw: Partial<LocalDocumentRecord> & {
+    slug: string
+    type: LocalDocumentType
+    content: string
+  }
+): LocalDocumentRecord {
+  const titleIsCustom = raw.titleIsCustom === true
+  const existingTitle =
+    typeof raw.title === 'string' ? raw.title.trim() : ''
+
+  let title: string
+  if (titleIsCustom && existingTitle) {
+    title = truncateDocumentTitle(existingTitle)
+  } else if (existingTitle) {
+    title = truncateDocumentTitle(existingTitle)
+  } else {
+    title = deriveDocumentTitle(raw.content || '', raw.type)
   }
 
-  const record: LocalDocumentRecord = {
-    slug: input.slug,
-    type: input.type,
-    mode: input.mode,
-    content: input.content,
-    isPrivate: input.isPrivate,
-    accessType: input.accessType,
-    updatedAt: Date.now(),
-    title: deriveTitle(input.content, input.type),
-    preview: normalizePreview(input.content),
+  return {
+    slug: raw.slug,
+    type: raw.type,
+    mode: raw.mode || 'formatter',
+    content: raw.content || '',
+    isPrivate: Boolean(raw.isPrivate),
+    accessType: raw.accessType || 'viewer',
+    updatedAt: raw.updatedAt || Date.now(),
+    title,
+    titleIsCustom,
+    preview:
+      typeof raw.preview === 'string'
+        ? raw.preview
+        : normalizePreview(raw.content || ''),
   }
+}
 
+function needsTitleBackfill(
+  raw: Partial<LocalDocumentRecord> | undefined
+): boolean {
+  if (!raw) return false
+  if (typeof raw.title !== 'string' || !raw.title.trim()) return true
+  if (raw.titleIsCustom === undefined) return true
+  return false
+}
+
+async function putRecord(record: LocalDocumentRecord): Promise<LocalDocumentRecord> {
   const db = await openDb()
 
   return new Promise((resolve, reject) => {
@@ -205,13 +264,9 @@ export async function saveLocalDocument(
   })
 }
 
-export async function getLocalDocumentBySlug(
+async function getRawBySlug(
   slug: string
-): Promise<LocalDocumentRecord | null> {
-  if (!isIndexedDbAvailable() || !slug) {
-    return null
-  }
-
+): Promise<Partial<LocalDocumentRecord> | null> {
   const db = await openDb()
 
   return new Promise((resolve, reject) => {
@@ -220,9 +275,10 @@ export async function getLocalDocumentBySlug(
     const request = store.get(slug)
 
     request.onsuccess = () => {
-      resolve((request.result as LocalDocumentRecord | undefined) || null)
+      resolve(
+        (request.result as Partial<LocalDocumentRecord> | undefined) || null
+      )
     }
-
     request.onerror = () =>
       reject(request.error || new Error('Failed to get local document'))
 
@@ -232,6 +288,117 @@ export async function getLocalDocumentBySlug(
   })
 }
 
+/**
+ * Persist a local document snapshot.
+ * Titles are LOCAL-ONLY (IndexedDB) — never part of the server/E2E payload.
+ */
+export async function saveLocalDocument(
+  input: SaveLocalDocumentInput
+): Promise<LocalDocumentRecord | null> {
+  if (!isIndexedDbAvailable() || !input.slug) {
+    return null
+  }
+
+  const existing = await getRawBySlug(input.slug)
+  const titleIsCustom = existing?.titleIsCustom === true
+  const title =
+    titleIsCustom && typeof existing?.title === 'string' && existing.title.trim()
+      ? truncateDocumentTitle(existing.title)
+      : deriveDocumentTitle(input.content, input.type)
+
+  const record: LocalDocumentRecord = {
+    slug: input.slug,
+    type: input.type,
+    mode: input.mode,
+    content: input.content,
+    isPrivate: input.isPrivate,
+    accessType: input.accessType,
+    updatedAt: Date.now(),
+    title,
+    titleIsCustom,
+    preview: normalizePreview(input.content),
+  }
+
+  return putRecord(record)
+}
+
+/**
+ * Rename a local document from the Local History modal.
+ * Empty/whitespace input → re-derive auto title and clear titleIsCustom.
+ */
+export async function updateLocalDocumentTitle(
+  slug: string,
+  nextTitle: string
+): Promise<LocalDocumentRecord | null> {
+  if (!isIndexedDbAvailable() || !slug) {
+    return null
+  }
+
+  const existing = await getRawBySlug(slug)
+  if (!existing?.slug || !existing.type) {
+    return null
+  }
+
+  const trimmed = nextTitle.trim()
+  let title: string
+  let titleIsCustom: boolean
+
+  if (!trimmed) {
+    title = deriveDocumentTitle(existing.content || '', existing.type)
+    titleIsCustom = false
+  } else {
+    title = truncateDocumentTitle(trimmed)
+    titleIsCustom = true
+  }
+
+  const record = ensureRecordShape({
+    slug: existing.slug,
+    type: existing.type,
+    mode: existing.mode,
+    content: existing.content || '',
+    isPrivate: existing.isPrivate,
+    accessType: existing.accessType,
+    preview: existing.preview,
+    title,
+    titleIsCustom,
+    updatedAt: Date.now(),
+  })
+
+  return putRecord(record)
+}
+
+export async function getLocalDocumentBySlug(
+  slug: string
+): Promise<LocalDocumentRecord | null> {
+  if (!isIndexedDbAvailable() || !slug) {
+    return null
+  }
+
+  const raw = await getRawBySlug(slug)
+  if (!raw || !raw.slug || !raw.type) {
+    return null
+  }
+
+  const record = ensureRecordShape(
+    raw as Partial<LocalDocumentRecord> & {
+      slug: string
+      type: LocalDocumentType
+      content: string
+    }
+  )
+
+  // Lazy backfill older records missing title / titleIsCustom
+  if (needsTitleBackfill(raw)) {
+    try {
+      await putRecord(record)
+    } catch {
+      // Display still works even if persist fails
+    }
+  }
+
+  return record
+}
+
 export async function listLocalDocuments(): Promise<LocalDocumentRecord[]> {
   if (!isIndexedDbAvailable()) {
     return []
@@ -239,25 +406,49 @@ export async function listLocalDocuments(): Promise<LocalDocumentRecord[]> {
 
   const db = await openDb()
 
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly')
-    const store = tx.objectStore(STORE_NAME)
-    const request = store.getAll()
+  const rawRecords: Partial<LocalDocumentRecord>[] = await new Promise(
+    (resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly')
+      const store = tx.objectStore(STORE_NAME)
+      const request = store.getAll()
 
-    request.onsuccess = () => {
-      const records =
-        (request.result as LocalDocumentRecord[] | undefined)?.slice() || []
-      records.sort((a, b) => b.updatedAt - a.updatedAt)
-      resolve(records)
+      request.onsuccess = () => {
+        resolve(
+          ((request.result as Partial<LocalDocumentRecord>[] | undefined) || []).slice()
+        )
+      }
+      request.onerror = () =>
+        reject(request.error || new Error('Failed to list local documents'))
+
+      tx.oncomplete = () => db.close()
+      tx.onerror = () => db.close()
+      tx.onabort = () => db.close()
     }
+  )
 
-    request.onerror = () =>
-      reject(request.error || new Error('Failed to list local documents'))
+  const records: LocalDocumentRecord[] = []
+  for (const raw of rawRecords) {
+    if (!raw?.slug || !raw.type) continue
+    const record = ensureRecordShape(
+      raw as Partial<LocalDocumentRecord> & {
+        slug: string
+        type: LocalDocumentType
+        content: string
+      }
+    )
+    records.push(record)
 
-    tx.oncomplete = () => db.close()
-    tx.onerror = () => db.close()
-    tx.onabort = () => db.close()
-  })
+    if (needsTitleBackfill(raw)) {
+      try {
+        await putRecord(record)
+      } catch {
+        // Ignore backfill persistence errors
+      }
+    }
+  }
+
+  records.sort((a, b) => b.updatedAt - a.updatedAt)
+  return records
 }
 
 export async function deleteLocalDocumentBySlug(slug: string): Promise<void> {
@@ -303,3 +494,5 @@ export async function clearLocalDocuments(): Promise<void> {
     tx.onabort = () => db.close()
   })
 }
+
+export const DOCUMENT_TITLE_MAX_LENGTH = TITLE_MAX_LENGTH

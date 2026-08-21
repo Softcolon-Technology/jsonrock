@@ -6,10 +6,6 @@ const clerkHandler = clerkMiddleware()
 // [AUTH-DEBUG] TEMP — remove after diagnosing stuck auth-loading
 // Note: this logs on the SERVER (hosting/runtime logs), not in the browser DevTools console.
 async function proxy(request: NextRequest, event: NextFetchEvent) {
-  console.log('[AUTH-DEBUG] proxy invoked', {
-    path: request.nextUrl.pathname,
-    method: request.method,
-  })
   return clerkHandler(request, event)
 }
 
