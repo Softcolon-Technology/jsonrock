@@ -5,6 +5,12 @@ export interface IUser extends Document {
   email: string
   name?: string
   avatarUrl?: string
+  /**
+   * High-entropy secret used only to derive the owner key-wrapping key.
+   * Never include in public document payloads — only return to the verified
+   * Clerk user who owns this record.
+   */
+  keyWrapSecret?: string
   deletedAt?: Date | null
   createdAt: Date
   updatedAt: Date
@@ -27,6 +33,9 @@ const UserSchema: Schema = new Schema(
       type: String,
     },
     avatarUrl: {
+      type: String,
+    },
+    keyWrapSecret: {
       type: String,
     },
     deletedAt: {

@@ -375,6 +375,107 @@ pre[class*="bg-zinc"]::-webkit-scrollbar-corner {
   background: rgba(239, 68, 68, 0.15) !important;
 }
 
+/* Markdown preview editor — Tailwind preflight resets h1–h6 to body size;
+   restore distinct heading styles to match the read-only ReactMarkdown preview. */
+.markdown-preview-editor h1 {
+  font-size: 1.875rem;
+  line-height: 1.25;
+  font-weight: 700;
+  color: #18181b;
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e4e4e7;
+  scroll-margin-top: 1rem;
+}
+.markdown-preview-editor h1:first-child {
+  margin-top: 0;
+}
+.markdown-preview-editor h2 {
+  font-size: 1.5rem;
+  line-height: 1.25;
+  font-weight: 700;
+  color: #27272a;
+  margin-top: 1.75rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.375rem;
+  border-bottom: 1px solid #e4e4e7;
+  scroll-margin-top: 1rem;
+}
+.markdown-preview-editor h3 {
+  font-size: 1.25rem;
+  line-height: 1.25;
+  font-weight: 600;
+  color: #27272a;
+  margin-top: 1.5rem;
+  margin-bottom: 0.625rem;
+  scroll-margin-top: 1rem;
+}
+.markdown-preview-editor h4 {
+  font-size: 1.125rem;
+  line-height: 1.25;
+  font-weight: 600;
+  color: #3f3f46;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.markdown-preview-editor h5 {
+  font-size: 1rem;
+  line-height: 1.25;
+  font-weight: 600;
+  color: #3f3f46;
+  margin-top: 1rem;
+  margin-bottom: 0.375rem;
+}
+.markdown-preview-editor h6 {
+  font-size: 0.875rem;
+  line-height: 1.25;
+  font-weight: 600;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 1rem;
+  margin-bottom: 0.375rem;
+}
+.markdown-preview-editor p {
+  margin-bottom: 1rem;
+}
+.markdown-preview-editor p:last-child {
+  margin-bottom: 0;
+}
+.markdown-preview-editor strong {
+  font-weight: 700;
+  color: #18181b;
+}
+.markdown-preview-editor a {
+  color: #059669;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.dark .markdown-preview-editor h1 {
+  color: #f4f4f5;
+  border-bottom-color: #3f3f46;
+}
+.dark .markdown-preview-editor h2 {
+  color: #e4e4e7;
+  border-bottom-color: #3f3f46;
+}
+.dark .markdown-preview-editor h3,
+.dark .markdown-preview-editor h4,
+.dark .markdown-preview-editor h5 {
+  color: #e4e4e7;
+}
+.dark .markdown-preview-editor h6 {
+  color: #a1a1aa;
+}
+.dark .markdown-preview-editor strong {
+  color: #fafafa;
+}
+.dark .markdown-preview-editor a {
+  color: #34d399;
+}
+
 /* Tiptap Placeholder Extension Support */
 .tiptap .is-editor-empty:first-child::before,
 .tiptap .is-empty::before {

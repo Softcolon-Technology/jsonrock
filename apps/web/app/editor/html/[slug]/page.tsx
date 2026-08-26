@@ -46,6 +46,9 @@ export default async function EditorHtmlSlugPage({ params }: Props) {
         mode: data.mode || 'visualize',
         isPrivate: data.isPrivate || false,
         accessType: data.accessType || 'editor',
+        previewOnly: data.previewOnly === true,
+        ownerId: data.ownerId || null,
+        hasOwnerKeyWrapped: data.hasOwnerKeyWrapped === true,
         createdAt: new Date().toISOString(),
       }
     }

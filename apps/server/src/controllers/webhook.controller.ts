@@ -2,6 +2,10 @@ import { Request, Response } from 'express'
 import { Webhook } from 'svix'
 import User from '../models/user.model'
 import logger from '../config/logger'
+import {
+  resolveWelcomeFirstName,
+  sendWelcomeEmail,
+} from '../services/email.service'
 
 interface ClerkEmailAddress {
   id: string
@@ -116,6 +120,36 @@ export class WebhookController {
             { upsert: true, new: true, setDefaultsOnInsert: true }
           )
           logger.info(`Synced user.created to local MongoDB: ${data.id}`)
+
+          // Side effect only — never fail the webhook if email send fails
+          if (email) {
+            try {
+              await sendWelcomeEmail({
+                recipientEmail: email,
+                firstName: resolveWelcomeFirstName({
+                  firstName: data.first_name,
+                  email,
+                }),
+              })
+            } catch (emailError) {
+              logger.error(
+                '[welcome-email] Failed after user.created sync (webhook still OK)',
+                {
+                  userId: data.id,
+                  email,
+                  error:
+                    emailError instanceof Error
+                      ? emailError.message
+                      : String(emailError),
+                }
+              )
+            }
+          } else {
+            logger.warn(
+              '[welcome-email] Skipped: no email on user.created payload',
+              { userId: data.id }
+            )
+          }
           break
         }
 

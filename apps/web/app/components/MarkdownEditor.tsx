@@ -26,8 +26,29 @@ import {
   Tag,
   Calendar,
   User,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react'
 import mermaid from 'mermaid'
+import MarkdownPreviewEditor from './MarkdownPreviewEditor'
+
+const SOURCE_COLLAPSED_STORAGE_KEY = 'jsonrock_markdown_source_collapsed'
+
+function readSourceCollapsedPreference(): boolean {
+  try {
+    return localStorage.getItem(SOURCE_COLLAPSED_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeSourceCollapsedPreference(collapsed: boolean) {
+  try {
+    localStorage.setItem(SOURCE_COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0')
+  } catch {
+    // Ignore quota / private-mode failures — preference just won't persist.
+  }
+}
 
 // ─── Mermaid Diagram ────────────────────────────────────────────────────────
 
@@ -602,7 +623,7 @@ const buildMdComponents = (): React.ComponentProps<
   },
   // pre is now handled by the code component wrapping it, but we keep a fallback
   pre: ({ children }) => (
-    <pre className='relative bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 my-4 overflow-x-auto text-zinc-800 dark:text-zinc-200 text-sm font-mono leading-relaxed shadow-sm [&>code]:!bg-transparent [&>code]:!border-none [&>code]:!p-0 [&>code]:!text-inherit [&>code]:!block'>
+    <pre className='relative bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 my-4 overflow-x-auto text-zinc-800 dark:text-zinc-200 text-sm font-mono leading-relaxed shadow-sm [&>code]:bg-transparent! [&>code]:border-none! [&>code]:p-0! [&>code]:text-inherit! [&>code]:block!'>
       {children}
     </pre>
   ),
@@ -838,6 +859,11 @@ interface MarkdownEditorProps {
   readOnly?: boolean
   onFileDrop?: (file: File) => Promise<void>
   slug?: string | null
+  /**
+   * Shared markdown link with previewOnly — hide source pane and editing chrome.
+   * Owners editing their own doc must not pass this.
+   */
+  sharePreviewOnly?: boolean
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -848,15 +874,34 @@ export default function MarkdownEditor({
   readOnly = false,
   onFileDrop,
   slug,
+  sharePreviewOnly = false,
 }: MarkdownEditorProps) {
   const [leftWidth, setLeftWidth] = useState(50)
   const [isDragging, setIsDragging] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [showToc, setShowToc] = useState(false)
+  // Default expanded (false); hydrate from localStorage after mount (SSR-safe).
+  const [isSourceCollapsed, setIsSourceCollapsed] = useState(false)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const previewRef = React.useRef<HTMLDivElement>(null)
   const isSyncing = React.useRef(false)
+
+  const effectivelyCollapsed = sharePreviewOnly || isSourceCollapsed
+  const effectivelyReadOnly = readOnly || sharePreviewOnly
+
+  useEffect(() => {
+    if (sharePreviewOnly) return
+    setIsSourceCollapsed(readSourceCollapsedPreference())
+  }, [sharePreviewOnly])
+
+  const toggleSourceCollapsed = React.useCallback(() => {
+    setIsSourceCollapsed((prev) => {
+      const next = !prev
+      writeSourceCollapsedPreference(next)
+      return next
+    })
+  }, [])
 
   const debouncedContent = useDebounce(content, 150)
 
@@ -957,6 +1002,11 @@ export default function MarkdownEditor({
     if (file && onFileDrop) await onFileDrop(file)
   }
 
+  const frontMatterBanner =
+    Object.keys(frontMatter).length > 0 ? (
+      <FrontMatterBanner data={frontMatter} />
+    ) : null
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div
@@ -965,80 +1015,115 @@ export default function MarkdownEditor({
       style={{ '--editor-left-width': `${leftWidth}%` } as React.CSSProperties}
     >
       {/* ── Left Pane — Raw Editor ─────────────────────────────────────── */}
-      <div
-        className={cn(
-          'w-full md:w-[var(--editor-left-width)] min-w-[200px] border-r border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col relative transition-colors duration-200',
-          isDragOver ? 'bg-emerald-500/5 dark:bg-emerald-500/10' : ''
-        )}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
-        {isDragOver && (
-          <div className='absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/60 dark:bg-black/60 backdrop-blur-[2px] pointer-events-none border-4 border-dashed border-emerald-500/50 rounded-lg animate-in fade-in duration-200'>
-            <div className='p-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 mb-4'>
-              <UploadCloud
-                size={48}
-                className='text-emerald-600 dark:text-emerald-400'
-              />
+      {!effectivelyCollapsed && (
+        <div
+          className={cn(
+            'w-full md:w-(--editor-left-width) min-w-50 border-r border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col relative transition-colors duration-200',
+            isDragOver ? 'bg-emerald-500/5 dark:bg-emerald-500/10' : ''
+          )}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {isDragOver && (
+            <div className='absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/60 dark:bg-black/60 backdrop-blur-[2px] pointer-events-none border-4 border-dashed border-emerald-500/50 rounded-lg animate-in fade-in duration-200'>
+              <div className='p-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 mb-4'>
+                <UploadCloud
+                  size={48}
+                  className='text-emerald-600 dark:text-emerald-400'
+                />
+              </div>
+              <p className='text-xl font-bold text-emerald-700 dark:text-emerald-300'>
+                Drop Markdown here
+              </p>
             </div>
-            <p className='text-xl font-bold text-emerald-700 dark:text-emerald-300'>
-              Drop Markdown here
-            </p>
+          )}
+          <div className='flex items-center px-4 py-1 bg-linear-to-b from-gray-50 to-gray-100 dark:from-zinc-800 dark:to-zinc-900 border-b border-zinc-300 dark:border-zinc-700 h-11 shrink-0 gap-2'>
+            <span className='text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider'>
+              Markdown
+            </span>
+            <div className='flex-1' />
+            <button
+              onClick={() => {
+                if (slug) handleMarkdownDownload(content, 'document.md')
+              }}
+              disabled={!slug}
+              title={
+                !slug
+                  ? 'Save or create document first to download'
+                  : 'Download Markdown (.md)'
+              }
+              className={cn(
+                'flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-colors',
+                !slug
+                  ? 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50'
+              )}
+            >
+              <Download size={14} />
+            </button>
           </div>
-        )}
-        <div className='flex items-center px-4 py-1 bg-gradient-to-b from-gray-50 to-gray-100 dark:from-zinc-800 dark:to-zinc-900 border-b border-zinc-300 dark:border-zinc-700 h-11 shrink-0 gap-2'>
-          <span className='text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider'>
-            Markdown
-          </span>
-          <div className='flex-1' />
-          <button
-            onClick={() => {
-              if (slug) handleMarkdownDownload(content, 'document.md')
-            }}
-            disabled={!slug}
-            title={
-              !slug
-                ? 'Save or create document first to download'
-                : 'Download Markdown (.md)'
+          <textarea
+            ref={textareaRef}
+            className='flex-1 w-full p-5 bg-white dark:bg-[#09090b] resize-none focus:outline-none dark:text-zinc-200 font-mono text-sm leading-7 caret-emerald-500 selection:bg-emerald-500/20 overflow-y-auto'
+            value={content}
+            onChange={(e) => onChange(e.target.value)}
+            onScroll={onTextareaScroll}
+            readOnly={effectivelyReadOnly}
+            placeholder={
+              '# Hello!\n\nStart writing markdown...\n\n- Use **bold**, *italic*\n- Add `code` blocks\n- Create tables, lists & more\n- Write $math$ or $$LaTeX$$\n- Draw ```mermaid diagrams```'
             }
-            className={cn(
-              'flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-colors',
-              !slug
-                ? 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50'
-            )}
-          >
-            <Download size={14} />
-          </button>
+            spellCheck={false}
+          />
         </div>
-        <textarea
-          ref={textareaRef}
-          className='flex-1 w-full p-5 bg-white dark:bg-[#09090b] resize-none focus:outline-none dark:text-zinc-200 font-mono text-sm leading-7 caret-emerald-500 selection:bg-emerald-500/20 overflow-y-auto'
-          value={content}
-          onChange={(e) => onChange(e.target.value)}
-          onScroll={onTextareaScroll}
-          readOnly={readOnly}
-          placeholder={
-            '# Hello!\n\nStart writing markdown...\n\n- Use **bold**, *italic*\n- Add `code` blocks\n- Create tables, lists & more\n- Write $math$ or $$LaTeX$$\n- Draw ```mermaid diagrams```'
-          }
-          spellCheck={false}
-        />
-      </div>
+      )}
 
       {/* ── Drag Handle ───────────────────────────────────────────────── */}
-      <div
-        className='hidden md:flex w-[6px] bg-transparent hover:bg-emerald-500/30 dark:hover:bg-emerald-500/20 cursor-col-resize z-40 items-center justify-center transition-colors shrink-0'
-        onMouseDown={startResizing}
-      />
+      {!effectivelyCollapsed && (
+        <div
+          className='hidden md:flex w-1.5 bg-transparent hover:bg-emerald-500/30 dark:hover:bg-emerald-500/20 cursor-col-resize z-40 items-center justify-center transition-colors shrink-0'
+          onMouseDown={startResizing}
+        />
+      )}
 
       {/* ── Right Pane — Preview ──────────────────────────────────────── */}
-      <div className='flex-1 overflow-hidden bg-white dark:bg-[#0a0a0a] min-w-[200px] flex flex-col relative'>
-        <div className='flex items-center px-4 py-1 bg-gradient-to-b from-gray-50 to-gray-100 dark:from-zinc-800 dark:to-zinc-900 border-b border-zinc-300 dark:border-zinc-700 h-11 shrink-0 gap-2'>
+      <div className='flex-1 overflow-hidden bg-white dark:bg-[#0a0a0a] min-w-50 flex flex-col relative'>
+        <div className='flex items-center px-4 py-1 bg-linear-to-b from-gray-50 to-gray-100 dark:from-zinc-800 dark:to-zinc-900 border-b border-zinc-300 dark:border-zinc-700 h-11 shrink-0 gap-2'>
           <span className='text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider'>
             Preview
           </span>
           <div className='flex-1' />
+
+          {/* Collapse / expand source pane */}
+          {!sharePreviewOnly && (
+            <button
+              type='button'
+              onClick={toggleSourceCollapsed}
+              title={
+                isSourceCollapsed
+                  ? 'Show markdown source'
+                  : 'Hide markdown source (full-width preview)'
+              }
+              aria-label={
+                isSourceCollapsed
+                  ? 'Show markdown source'
+                  : 'Hide markdown source'
+              }
+              aria-pressed={isSourceCollapsed}
+              className={cn(
+                'flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-colors',
+                isSourceCollapsed
+                  ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50'
+              )}
+            >
+              {isSourceCollapsed ? (
+                <PanelLeftOpen size={14} />
+              ) : (
+                <PanelLeftClose size={14} />
+              )}
+            </button>
+          )}
 
           {/* Table of Contents toggle */}
           {tocItems.length > 0 && (
@@ -1109,37 +1194,46 @@ export default function MarkdownEditor({
               onClose={() => setShowToc(false)}
             />
           )}
-          <div
-            ref={previewRef}
-            className='h-full p-8 overflow-y-auto'
-            onScroll={onPreviewScroll}
-          >
-            {debouncedContent.trim() ? (
-              <>
-                <FrontMatterBanner data={frontMatter} />
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[
-                    // Parse raw HTML in markdown, then sanitize (keeps XSS-safe tags)
-                    rehypeRaw,
-                    [rehypeSanitize, rehypeSchema],
-                    // Run after sanitize so KaTeX/slug output is trusted & ToC ids stay intact
-                    rehypeKatex,
-                    rehypeSlug,
-                  ]}
-                  components={mdComponents}
-                >
-                  {markdownBody}
-                </ReactMarkdown>
-              </>
-            ) : (
-              <div className='h-full flex items-center justify-center'>
-                <p className='text-zinc-400 dark:text-zinc-600 text-sm italic'>
-                  Preview will appear here as you type...
-                </p>
-              </div>
-            )}
-          </div>
+
+          {effectivelyReadOnly ? (
+            <div
+              ref={previewRef}
+              className='h-full overflow-y-auto p-8'
+              onScroll={onPreviewScroll}
+            >
+              {debouncedContent.trim() ? (
+                <>
+                  {frontMatterBanner}
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[
+                      rehypeRaw,
+                      [rehypeSanitize, rehypeSchema],
+                      rehypeKatex,
+                      rehypeSlug,
+                    ]}
+                    components={mdComponents}
+                  >
+                    {markdownBody}
+                  </ReactMarkdown>
+                </>
+              ) : (
+                <div className='h-full flex items-center justify-center'>
+                  <p className='text-zinc-400 dark:text-zinc-600 text-sm italic'>
+                    Preview will appear here as you type...
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <MarkdownPreviewEditor
+              content={content}
+              onChange={onChange}
+              scrollRef={previewRef}
+              onScroll={effectivelyCollapsed ? undefined : onPreviewScroll}
+              frontMatterBanner={frontMatterBanner}
+            />
+          )}
         </div>
       </div>
     </div>
