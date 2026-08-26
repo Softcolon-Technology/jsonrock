@@ -1183,6 +1183,10 @@ const RichTextEditor = ({
     immediatelyRender: false,
     extensions: [
       StarterKit.configure({
+        // Provided separately below with custom config / node views.
+        link: false,
+        underline: false,
+        codeBlock: false,
         bulletList: {
           HTMLAttributes: {
             class: 'list-disc list-outside ml-6',

@@ -226,7 +226,7 @@ function DiffToast({
   return (
     <div
       className={cn(
-        'fixed top-4 right-4 z-[200] flex items-center gap-3 px-4 py-3 rounded-lg shadow-xl border animate-in slide-in-from-top-4 fade-in duration-300',
+        'fixed top-4 right-4 z-200 flex items-center gap-3 px-4 py-3 rounded-lg shadow-xl border animate-in slide-in-from-top-4 fade-in duration-300',
         'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100'
       )}
     >
