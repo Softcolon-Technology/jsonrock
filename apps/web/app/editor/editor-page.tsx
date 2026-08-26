@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import type { Edge, Node } from 'reactflow'
 import {
@@ -56,12 +56,34 @@ import { ShareType, getEditorBasePath } from '../iterface'
 import {
   clearLocalDocuments,
   deleteLocalDocumentBySlug,
+  deriveDocumentTitle,
   getLocalDocumentBySlug,
   listLocalDocuments,
   LocalDocumentRecord,
   saveLocalDocument,
   updateLocalDocumentTitle,
 } from '@/lib/local-docs'
+import {
+  EditorTabSnapshot,
+  getEditorTabSession,
+  patchEditorTabSession,
+  setEditorTabSession,
+} from '@/lib/editor-tab-session'
+import {
+  decryptContent,
+  deriveKeyFromPassword,
+  encryptContent,
+  extractKeyFromFragment,
+  generateDocumentKey,
+  generateSalt,
+  importKeyFromFragment,
+  setKeyInFragment,
+} from '@/lib/crypto'
+import {
+  buildOwnerKeyWrapped,
+  tryOwnerUnwrapContentKey,
+} from '@/lib/owner-key-wrap'
+import { useUser, useAuth, useClerk } from '@clerk/nextjs'
 
 const RichTextEditor = dynamic(() => import('../components/RichTextEditor'), {
   ssr: false,
@@ -113,17 +135,29 @@ const DEFAULT_HTML_CONTENT = `<!DOCTYPE html>
   </div>
 </body>
 </html>`
-import {
-  decryptContent,
-  deriveKeyFromPassword,
-  encryptContent,
-  extractKeyFromFragment,
-  generateDocumentKey,
-  generateSalt,
-  importKeyFromFragment,
-  setKeyInFragment,
-} from '@/lib/crypto'
-import { useUser, useAuth, useClerk } from '@clerk/nextjs'
+
+const DEFAULT_JSON_CONTENT = `{
+  "project": "JSON ROCK",
+  "visualize": true,
+  "features": [
+    "Graph View",
+    "Tree View",
+    "Formatter"
+  ],
+  "metrics": {
+    "speed": 100,
+    "usability": "high"
+  }
+}`
+
+const DEFAULT_MARKDOWN_CONTENT = '# Hello Markdown\n\nStart typing...'
+
+function getDefaultEditorContent(type: ShareType): string {
+  if (type === 'text') return ''
+  if (type === 'markdown') return DEFAULT_MARKDOWN_CONTENT
+  if (type === 'html') return DEFAULT_HTML_CONTENT
+  return DEFAULT_JSON_CONTENT
+}
 
 export type JsonShareMode = 'visualize' | 'tree' | 'formatter'
 
@@ -142,6 +176,11 @@ export interface ShareLinkRecord {
   mode: JsonShareMode
   isPrivate: boolean
   accessType?: ShareAccessType // Defaults to 'viewer' if undefined for old records
+  previewOnly?: boolean
+  /** Clerk user id of the document owner (public metadata; never includes wrap secret). */
+  ownerId?: string | null
+  /** True when a wrapped owner content key exists (payload itself is not public). */
+  hasOwnerKeyWrapped?: boolean
   createdAt: Date
   updatedAt: Date
 }
@@ -154,6 +193,9 @@ type SerializedShareLinkRecord = Omit<ShareLinkRecord, 'createdAt' | '_id'> & {
   schemaVersion?: number
   isLegacyPlaintext?: boolean
   json?: string
+  previewOnly?: boolean
+  ownerId?: string | null
+  hasOwnerKeyWrapped?: boolean
 }
 
 interface HomeProps {
@@ -178,48 +220,114 @@ export default function Home({
   const effectiveFeatureMode = initialRecord?.type || paramType || featureMode
   const effectiveViewMode = paramView || initialRecord?.mode || 'visualize'
 
+  // Session cache for this editor type. Header tab switches remount EditorPage
+  // (different routes), so we hydrate from the in-memory store instead of defaults.
+  const cachedRootSession =
+    !urlSlug && !initialRecord
+      ? getEditorTabSession(effectiveFeatureMode)
+      : undefined
+
   const [isLegacyDocument, setIsLegacyDocument] = useState<boolean>(
-    initialRecord?.isLegacyPlaintext ||
-      initialRecord?.schemaVersion === 1 ||
-      false
+    cachedRootSession?.isLegacyDocument ??
+      (initialRecord?.isLegacyPlaintext ||
+        initialRecord?.schemaVersion === 1 ||
+        false)
   )
   const [showMigrationBanner, setShowMigrationBanner] = useState<boolean>(
-    initialRecord?.isLegacyPlaintext ||
-      initialRecord?.schemaVersion === 1 ||
-      false
+    cachedRootSession?.showMigrationBanner ??
+      (initialRecord?.isLegacyPlaintext ||
+        initialRecord?.schemaVersion === 1 ||
+        false)
   )
 
   const [currentJsonContent, setCurrentJsonContent] = useState<string>(() => {
     if (initialRecord?.isLegacyPlaintext && initialRecord.json) {
       return initialRecord.json
     }
-    return effectiveFeatureMode === 'text'
-      ? ''
-      : effectiveFeatureMode === 'markdown'
-        ? '# Hello Markdown\n\nStart typing...'
-        : effectiveFeatureMode === 'html'
-          ? DEFAULT_HTML_CONTENT
-          : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+    if (cachedRootSession) return cachedRootSession.content
+    return getDefaultEditorContent(effectiveFeatureMode)
   })
 
-  const lastPersistedContentRef = React.useRef<string>(currentJsonContent)
+  const lastPersistedContentRef = React.useRef<string>(
+    cachedRootSession?.lastPersistedContent ?? currentJsonContent
+  )
 
   // Clerk Authentication state
   const { isSignedIn, isLoaded: isUserLoaded } = useUser()
-  const { getToken, isLoaded: isAuthLoaded } = useAuth()
+  const { getToken, isLoaded: isAuthLoaded, userId: clerkUserId } = useAuth()
   const { openSignIn } = useClerk()
+
+  // [AUTH-DEBUG] TEMP — every render (do not remove until live diagnosis complete)
+  console.log(Date.now(), 'auth state: editor-page', {
+    isLoaded: isUserLoaded,
+    isAuthLoaded,
+    isSignedIn,
+    userId: clerkUserId ?? null,
+  })
+
+  // [AUTH-DEBUG] TEMP — wrap fetch once to log Clerk network timing/status
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const w = window as Window & { __authDebugFetchPatched?: boolean }
+    if (w.__authDebugFetchPatched) return
+    w.__authDebugFetchPatched = true
+
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (...args: Parameters<typeof fetch>) => {
+      const input = args[0]
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url
+      const isClerk = /clerk\.(com|accounts\.dev)|clerk\.|\/v1\//i.test(url)
+      const started = Date.now()
+      try {
+        const res = await originalFetch(...args)
+        if (isClerk) {
+          console.log(Date.now(), '[AUTH-DEBUG] clerk fetch', {
+            url,
+            status: res.status,
+            ok: res.ok,
+            ms: Date.now() - started,
+          })
+        }
+        return res
+      } catch (error) {
+        if (isClerk) {
+          console.log(Date.now(), '[AUTH-DEBUG] clerk fetch FAILED', {
+            url,
+            ms: Date.now() - started,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+        throw error
+      }
+    }
+
+    return () => {
+      // keep patch for session; clearing flag only on full reload
+    }
+  }, [])
+
   const pendingShareSettingsRef = React.useRef<{
     accessLevel: ShareAccessType
     isPrivateLink: boolean
     sharePassword?: string
+    previewOnly?: boolean
   } | null>(null)
   const pendingOpenShareModalRef = React.useRef<boolean>(false)
 
   // Web Crypto Key and E2EE state (In-memory ONLY, NEVER persisted to IndexedDB or localStorage)
-  const activeKeyRef = React.useRef<CryptoKey | null>(null)
-  const activeKeyStringRef = React.useRef<string | null>(null)
+  const activeKeyRef = React.useRef<CryptoKey | null>(
+    cachedRootSession?.activeKey ?? null
+  )
+  const activeKeyStringRef = React.useRef<string | null>(
+    cachedRootSession?.activeKeyString ?? null
+  )
   const documentSaltRef = React.useRef<string | null>(
-    initialRecord?.salt || null
+    initialRecord?.salt || cachedRootSession?.documentSalt || null
   )
   const encryptedPayloadRef = React.useRef<{
     ciphertext: string
@@ -227,7 +335,7 @@ export default function Home({
   } | null>(
     initialRecord?.ciphertext && initialRecord?.iv
       ? { ciphertext: initialRecord.ciphertext, iv: initialRecord.iv }
-      : null
+      : (cachedRootSession?.encryptedPayload ?? null)
   )
   const [decryptionError, setDecryptionError] = useState<string | null>(null)
   const [, setIsDecrypting] = useState<boolean>(false)
@@ -246,7 +354,7 @@ export default function Home({
   const [parsedJsonData, setParsedJsonData] = useState<any>(null)
   const [currentViewMode, setCurrentViewMode] = useState<
     'visualize' | 'tree' | 'formatter'
-  >(effectiveViewMode)
+  >(cachedRootSession?.viewMode || effectiveViewMode)
 
   const [documentType, setDocumentType] =
     useState<ShareType>(effectiveFeatureMode)
@@ -281,13 +389,18 @@ export default function Home({
     isJsonValid &&
     (!monacoValidationError || monacoValidationError.severity !== 'error')
 
+
   // Split state:
   // 1. currentJsonContent = Source of Truth for Saving/Graph (Updated by local typing)
   // 2. syncedRemoteContent = Source of Truth for Editor Display (Updated ONLY by Socket/System)
   const [syncedRemoteContent, setSyncedRemoteContent] = useState<{
     code: string
     nonce: number
-  } | null>(null)
+  } | null>(() =>
+    cachedRootSession
+      ? { code: cachedRootSession.content, nonce: Date.now() }
+      : null
+  )
 
   const [indentationSize, setIndentationSize] = useState<string>('2')
 
@@ -298,16 +411,36 @@ export default function Home({
 
   // Share State
   const [documentSlug, setDocumentSlug] = useState<string | null>(
-    initialRecord?.slug || null
+    initialRecord?.slug || cachedRootSession?.slug || null
   )
   const [isDocumentPrivate, setIsDocumentPrivate] = useState(
-    initialRecord?.isPrivate || false
+    cachedRootSession?.isDocumentPrivate ?? (initialRecord?.isPrivate || false)
+  )
+  const [isPreviewOnly, setIsPreviewOnly] = useState(
+    initialRecord?.previewOnly === true
+  )
+  const [documentOwnerId, setDocumentOwnerId] = useState<string | null>(
+    initialRecord?.ownerId ?? null
+  )
+  const [hasOwnerKeyWrapped, setHasOwnerKeyWrapped] = useState(
+    initialRecord?.hasOwnerKeyWrapped === true
   )
   const [userAccessLevel, setUserAccessLevel] = useState<ShareAccessType>(
-    initialRecord?.accessType || 'viewer'
+    cachedRootSession?.userAccessLevel || initialRecord?.accessType || 'viewer'
   )
 
-  const [isCurrentUserOwner, setIsCurrentUserOwner] = useState(false)
+  const [isCurrentUserOwner, setIsCurrentUserOwner] = useState(
+    cachedRootSession?.isCurrentUserOwner ?? false
+  )
+
+  // Shared markdown links with previewOnly: non-owners get article view only.
+  // Owners keep the full editor even when the flag is on for recipients.
+  const isMarkdownPreviewOnlyShare =
+    documentType === 'markdown' &&
+    isPreviewOnly &&
+    !isCurrentUserOwner &&
+    Boolean(urlSlug || documentSlug)
+
 
   // Helper to determine ownership (moved before canEdit initialization)
   const checkOwnership = useCallback((targetSlug: string) => {
@@ -327,25 +460,48 @@ export default function Home({
 
   // Initialize hasEditPermission based on initialRecord to prevent race condition
   const [hasEditPermission, setHasEditPermission] = useState(() => {
+    if (cachedRootSession) return cachedRootSession.hasEditPermission
     if (!initialRecord?.slug) return true // New document - always editable
     const isOwned = checkOwnership(initialRecord.slug)
     if (isOwned) return true // Owner always can edit
     return initialRecord.accessType === 'editor' // Non-owner: check accessType
   })
 
-  const [documentPassword, setDocumentPassword] = useState('')
+  const [documentPassword, setDocumentPassword] = useState(
+    cachedRootSession?.documentPassword ?? ''
+  )
   const [isAutoSaving, setIsAutoSaving] = useState<boolean>(false)
   // Track if the record is indefinitely private (persisted as private)
   const [isPrivacyLocked, setIsPrivacyLocked] = useState(
-    initialRecord?.isPrivate || false
+    cachedRootSession?.isPrivacyLocked ?? (initialRecord?.isPrivate || false)
   )
 
   const [isShareModalOpen, setIsShareModalOpen] = useState(false)
 
-  // Locked State for Private Links
-  const [isPasswordLocked, setIsPasswordLocked] = useState(
-    (initialRecord?.isPrivate && !initialRecord?.json) || false
-  )
+  // Locked State for Private Links — defer password UI until owner-unlock check finishes
+  const [isPasswordLocked, setIsPasswordLocked] = useState(() => {
+    if (cachedRootSession) return cachedRootSession.isPasswordLocked
+    if (
+      initialRecord?.isPrivate &&
+      !initialRecord?.json &&
+      initialRecord?.schemaVersion !== 1 &&
+      !initialRecord?.isLegacyPlaintext
+    ) {
+      return false
+    }
+    return Boolean(initialRecord?.isPrivate && !initialRecord?.json)
+  })
+  const [isOwnerUnlockPending, setIsOwnerUnlockPending] = useState(() => {
+    if (cachedRootSession && !cachedRootSession.isPasswordLocked) return false
+    return Boolean(
+      initialRecord?.isPrivate &&
+        !initialRecord?.json &&
+        initialRecord?.schemaVersion !== 1 &&
+        !initialRecord?.isLegacyPlaintext
+    )
+  })
+  /** Bumps when private ciphertext is ready so owner-unlock can re-run safely. */
+  const [ownerUnlockNonce, setOwnerUnlockNonce] = useState(0)
   const [isUnlocking, setIsUnlocking] = useState(false)
   const [unlockErrorMessage, setUnlockErrorMessage] = useState<string | null>(
     null
@@ -406,6 +562,9 @@ export default function Home({
 
       setDocumentSlug(data.slug || null)
       setIsDocumentPrivate(isPrivate)
+      setIsPreviewOnly(data.previewOnly === true)
+      setDocumentOwnerId(data.ownerId || null)
+      setHasOwnerKeyWrapped(data.hasOwnerKeyWrapped === true)
       setUserAccessLevel(data.accessType || 'viewer')
       setDocumentType(data.type || 'json')
       setCurrentViewMode(paramView || data.mode || 'visualize')
@@ -466,18 +625,12 @@ export default function Home({
 
       // If empty ciphertext (newly created doc)
       if (!ciphertext) {
-        const defaultContent =
-          data.type === 'text'
-            ? ''
-            : data.type === 'markdown'
-              ? '# Hello Markdown\n\nStart typing...'
-              : data.type === 'html'
-                ? DEFAULT_HTML_CONTENT
-                : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+        const defaultContent = getDefaultEditorContent(data.type || 'json')
         setCurrentJsonContent(defaultContent)
         setSyncedRemoteContent({ code: defaultContent, nonce: Date.now() })
         lastPersistedContentRef.current = defaultContent
         setIsPasswordLocked(false)
+        setIsOwnerUnlockPending(false)
         setIsPrivacyLocked(isPrivate)
         setIsDecrypting(false)
         return
@@ -489,8 +642,11 @@ export default function Home({
         if (isPrivate) {
           const pwd = customPassword || documentPassword
           if (!pwd) {
-            setIsPasswordLocked(true)
+            // Defer password UI — owner may unwrap via Clerk without a prompt flash
             setIsPrivacyLocked(true)
+            setIsPasswordLocked(false)
+            setOwnerUnlockNonce((n) => n + 1)
+            setIsOwnerUnlockPending(true)
             setIsDecrypting(false)
             return
           }
@@ -501,6 +657,7 @@ export default function Home({
           }
           key = await deriveKeyFromPassword(pwd, salt)
           activeKeyRef.current = key
+          setIsOwnerUnlockPending(false)
         } else {
           const keyString = extractKeyFromFragment()
           if (!keyString) {
@@ -539,6 +696,79 @@ export default function Home({
     [checkOwnership, documentPassword, paramView]
   )
 
+  // Owner bypass: unwrap content key via authenticated endpoint before password UI
+  useEffect(() => {
+    if (!isOwnerUnlockPending) return
+    if (!isAuthLoaded || !isUserLoaded) return
+
+    const payload = encryptedPayloadRef.current
+    // Wait until decryptAndApplyData has stored the ciphertext (avoid racing mount)
+    if (!payload?.ciphertext || !payload?.iv) return
+
+    let cancelled = false
+
+    ;(async () => {
+      const slug = documentSlug || urlSlug || initialRecord?.slug || null
+      const canTry =
+        Boolean(isSignedIn) &&
+        Boolean(clerkUserId) &&
+        Boolean(documentOwnerId) &&
+        clerkUserId === documentOwnerId &&
+        hasOwnerKeyWrapped &&
+        Boolean(slug)
+
+      if (canTry && slug) {
+        try {
+          const key = await tryOwnerUnwrapContentKey(slug, getToken)
+          if (key && !cancelled) {
+            const plaintext = await decryptContent(
+              payload.ciphertext,
+              payload.iv,
+              key
+            )
+            activeKeyRef.current = key
+            activeKeyStringRef.current = null
+            setCurrentJsonContent(plaintext)
+            setSyncedRemoteContent({ code: plaintext, nonce: Date.now() })
+            lastPersistedContentRef.current = plaintext
+            setIsPasswordLocked(false)
+            setIsPrivacyLocked(true)
+            setIsCurrentUserOwner(true)
+            setHasEditPermission(true)
+            setDecryptionError(null)
+            setIsOwnerUnlockPending(false)
+            return
+          }
+        } catch (err) {
+          console.warn('Owner key unwrap failed; falling back to password', err)
+        }
+      }
+
+      if (!cancelled) {
+        setIsPasswordLocked(true)
+        setIsPrivacyLocked(true)
+        setIsOwnerUnlockPending(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    isOwnerUnlockPending,
+    ownerUnlockNonce,
+    isAuthLoaded,
+    isUserLoaded,
+    isSignedIn,
+    clerkUserId,
+    documentOwnerId,
+    hasOwnerKeyWrapped,
+    documentSlug,
+    urlSlug,
+    initialRecord?.slug,
+    getToken,
+  ])
+
   const syncFromLocalRecord = useCallback(
     (record: LocalDocumentRecord) => {
       const content = record.content || ''
@@ -551,6 +781,7 @@ export default function Home({
       setDocumentSlug(record.slug)
       setDocumentType(record.type)
       setIsDocumentPrivate(record.isPrivate)
+      setIsPreviewOnly(false)
       setUserAccessLevel(record.accessType)
       setCurrentViewMode(resolvedMode)
       setSyncedRemoteContent({ code: content, nonce: Date.now() })
@@ -565,11 +796,89 @@ export default function Home({
     [paramView]
   )
 
+  const applyTabSnapshot = useCallback((snapshot: EditorTabSnapshot) => {
+    setCurrentJsonContent(snapshot.content)
+    setDocumentSlug(snapshot.slug)
+    setDocumentType(snapshot.type)
+    setCurrentViewMode(snapshot.viewMode)
+    setIsDocumentPrivate(snapshot.isDocumentPrivate)
+    setUserAccessLevel(snapshot.userAccessLevel)
+    setHasEditPermission(snapshot.hasEditPermission)
+    setIsCurrentUserOwner(snapshot.isCurrentUserOwner)
+    setIsPrivacyLocked(snapshot.isPrivacyLocked)
+    setIsPasswordLocked(snapshot.isPasswordLocked)
+    setIsLegacyDocument(snapshot.isLegacyDocument)
+    setShowMigrationBanner(snapshot.showMigrationBanner)
+    setDocumentPassword(snapshot.documentPassword)
+    setSyncedRemoteContent({
+      code: snapshot.content,
+      nonce: Date.now(),
+    })
+    lastPersistedContentRef.current = snapshot.lastPersistedContent
+    activeKeyRef.current = snapshot.activeKey
+    activeKeyStringRef.current = snapshot.activeKeyString
+    documentSaltRef.current = snapshot.documentSalt
+    encryptedPayloadRef.current = snapshot.encryptedPayload
+    setDecryptionError(null)
+  }, [])
+
   // Track whether this is the first mount — SSR already provided initialRecord, no need to re-fetch
   const isInitialMountRef = React.useRef(!!initialRecord)
 
   // Ref to prevent initial fetch when we JUST created the slug via auto-save
   const justAutoSavedSlugRef = React.useRef<string | null>(null)
+  const lastRootNavKeyRef = React.useRef<string | null>(null)
+  const hydratedFromCacheRef = React.useRef(!!cachedRootSession)
+
+  const restoreSessionUrl = useCallback((snapshot: EditorTabSnapshot) => {
+    if (typeof window === 'undefined' || !snapshot.slug) return
+
+    const route = `${getEditorBasePath(snapshot.type)}/`
+    const viewParam =
+      snapshot.type === 'text' ||
+      snapshot.type === 'markdown' ||
+      snapshot.type === 'html'
+        ? ''
+        : `?view=${snapshot.viewMode}`
+    const fragment = snapshot.activeKeyString
+      ? `#key=${snapshot.activeKeyString}`
+      : ''
+    const newUrl = `${route}${snapshot.slug}${viewParam}${fragment}`
+
+    const currentPath = window.location.pathname.replace(/\/$/, '') || '/'
+    const basePath = getEditorBasePath(snapshot.type)
+    if (currentPath === basePath) {
+      justAutoSavedSlugRef.current = snapshot.slug
+      window.history.replaceState(
+        { ...window.history.state, as: newUrl, url: newUrl },
+        '',
+        newUrl
+      )
+    }
+  }, [])
+
+  // Restore this type's in-memory session before paint so tab switches don't
+  // flash default content. useState also hydrates from the same store on
+  // client remounts; this covers the case where SSR rendered defaults.
+  useLayoutEffect(() => {
+    if (urlSlug || initialRecord) return
+
+    const cached = getEditorTabSession(featureMode)
+    if (!cached) return
+
+    if (!hydratedFromCacheRef.current) {
+      applyTabSnapshot(cached)
+    }
+    restoreSessionUrl(cached)
+    lastRootNavKeyRef.current = `root:${featureMode}`
+    setIsPageLoading(false)
+  }, [
+    urlSlug,
+    initialRecord,
+    featureMode,
+    applyTabSnapshot,
+    restoreSessionUrl,
+  ])
 
   // Initial SSR Hydration & Key Decryption
   useEffect(() => {
@@ -581,6 +890,8 @@ export default function Home({
   // Sync state when URL slug changes (Navigation / Refresh)
   useEffect(() => {
     if (urlSlug) {
+      lastRootNavKeyRef.current = null
+
       if (justAutoSavedSlugRef.current === urlSlug) {
         justAutoSavedSlugRef.current = null
         return
@@ -650,20 +961,33 @@ export default function Home({
 
       return () => controller.abort()
     } else {
-      // NAVIGATED TO ROOT (New File)
+      // NAVIGATED TO ROOT (New File) — or switched back to this editor type.
+      // Do not re-run on unrelated callback identity changes: that wipes typing.
+      const rootNavKey = `root:${featureMode}`
+      if (lastRootNavKeyRef.current === rootNavKey) {
+        setIsPageLoading(false)
+        return
+      }
+      lastRootNavKeyRef.current = rootNavKey
       isInitialMountRef.current = false
-      const defaultContent =
-        featureMode === 'text'
-          ? ''
-          : featureMode === 'markdown'
-            ? '# Hello Markdown\n\nStart typing...'
-            : featureMode === 'html'
-              ? DEFAULT_HTML_CONTENT
-              : '{\n  "project": "JSON ROCK",\n  "visualize": true,\n  "features": [\n    "Graph View",\n    "Tree View",\n    "Formatter"\n  ],\n  "metrics": {\n    "speed": 100,\n    "usability": "high"\n  }\n}'
+
+      const cached = getEditorTabSession(featureMode)
+      if (cached) {
+        if (!hydratedFromCacheRef.current) {
+          applyTabSnapshot(cached)
+        }
+        hydratedFromCacheRef.current = false
+        restoreSessionUrl(cached)
+        setIsPageLoading(false)
+        return
+      }
+
+      const defaultContent = getDefaultEditorContent(featureMode)
 
       setCurrentJsonContent(defaultContent)
       setDocumentSlug(null)
       setIsDocumentPrivate(false)
+      setIsPreviewOnly(false)
       setUserAccessLevel('viewer')
       setDocumentType(featureMode)
       if (
@@ -679,6 +1003,8 @@ export default function Home({
       lastPersistedContentRef.current = defaultContent
       activeKeyRef.current = null
       activeKeyStringRef.current = null
+      documentSaltRef.current = null
+      encryptedPayloadRef.current = null
       setDecryptionError(null)
       resetWorker()
       setIsPageLoading(false)
@@ -688,8 +1014,11 @@ export default function Home({
     featureMode,
     decryptAndApplyData,
     syncFromLocalRecord,
+    applyTabSnapshot,
+    restoreSessionUrl,
     resetWorker,
     checkOwnership,
+    paramView,
   ])
 
   // Sync currentViewMode with URL parameter changes (for browser back/forward navigation)
@@ -729,6 +1058,91 @@ export default function Home({
     isPrivateRef.current = isDocumentPrivate
     isValidRef.current = isJsonValid
   }, [documentSlug, isPasswordLocked, isDocumentPrivate, isJsonValid])
+
+  const isPageLoadingRef = React.useRef(isPageLoading)
+  isPageLoadingRef.current = isPageLoading
+
+  const tabSnapshotRef = React.useRef<EditorTabSnapshot>({
+    type: documentType,
+    content: currentJsonContent,
+    slug: documentSlug,
+    viewMode: currentViewMode,
+    isDocumentPrivate,
+    userAccessLevel,
+    hasEditPermission,
+    isCurrentUserOwner,
+    isPrivacyLocked,
+    isPasswordLocked,
+    isLegacyDocument,
+    showMigrationBanner,
+    lastPersistedContent: lastPersistedContentRef.current,
+    documentPassword,
+    activeKey: activeKeyRef.current,
+    activeKeyString: activeKeyStringRef.current,
+    documentSalt: documentSaltRef.current,
+    encryptedPayload: encryptedPayloadRef.current,
+  })
+
+  tabSnapshotRef.current = {
+    type: documentType,
+    content: currentJsonContent,
+    slug: documentSlug,
+    viewMode: currentViewMode,
+    isDocumentPrivate,
+    userAccessLevel,
+    hasEditPermission,
+    isCurrentUserOwner,
+    isPrivacyLocked,
+    isPasswordLocked,
+    isLegacyDocument,
+    showMigrationBanner,
+    lastPersistedContent: lastPersistedContentRef.current,
+    documentPassword,
+    activeKey: activeKeyRef.current,
+    activeKeyString: activeKeyStringRef.current,
+    documentSalt: documentSaltRef.current,
+    encryptedPayload: encryptedPayloadRef.current,
+  }
+
+  useEffect(() => {
+    if (isPageLoading) return
+    setEditorTabSession(documentType, tabSnapshotRef.current)
+  }, [
+    currentJsonContent,
+    documentSlug,
+    documentType,
+    currentViewMode,
+    isDocumentPrivate,
+    userAccessLevel,
+    hasEditPermission,
+    isCurrentUserOwner,
+    isPrivacyLocked,
+    isPasswordLocked,
+    isLegacyDocument,
+    showMigrationBanner,
+    documentPassword,
+    isPageLoading,
+  ])
+
+  useEffect(() => {
+    return () => {
+      const snapshot = tabSnapshotRef.current
+      if (isPageLoadingRef.current && !snapshot.slug) return
+      setEditorTabSession(snapshot.type, snapshot)
+      if (!snapshot.slug || snapshot.isPasswordLocked) return
+
+      void saveLocalDocument({
+        slug: snapshot.slug,
+        type: snapshot.type,
+        mode: snapshot.type === 'json' ? snapshot.viewMode : 'formatter',
+        content: snapshot.content,
+        isPrivate: snapshot.isDocumentPrivate,
+        accessType: snapshot.userAccessLevel,
+      }).catch((error) => {
+        console.error('Failed to flush local document on tab switch', error)
+      })
+    }
+  }, [])
 
   const emitTimeout = React.useRef<NodeJS.Timeout | null>(null)
 
@@ -1076,6 +1490,52 @@ export default function Home({
             }
           } catch (e) {}
         }
+        if (clerkUserId && documentOwnerId && clerkUserId === documentOwnerId) {
+          setIsCurrentUserOwner(true)
+          setHasEditPermission(true)
+        }
+      }
+
+      // Backfill ownerKeyWrapped after password unlock (enables cross-device owner bypass)
+      if (isSignedIn && slug) {
+        try {
+          const wrapped = await buildOwnerKeyWrapped(key, getToken)
+          if (wrapped) {
+            let token: string | null = null
+            try {
+              token = await getToken()
+            } catch {
+              token = null
+            }
+            const headers: Record<string, string> = {
+              'Content-Type': 'application/json',
+            }
+            if (token) headers.Authorization = `Bearer ${token}`
+
+            const putRes = await fetch(`/api/share/${slug}`, {
+              method: 'PUT',
+              headers,
+              body: JSON.stringify({
+                schemaVersion: 2,
+                ciphertext: payload.ciphertext,
+                iv: payload.iv,
+                salt,
+                mode: currentViewMode,
+                isPrivate: true,
+                accessType: userAccessLevel,
+                type: documentType,
+                ownerKeyWrapped: wrapped,
+              }),
+            })
+            if (putRes.ok) {
+              setHasOwnerKeyWrapped(true)
+              const putData = await putRes.json()
+              if (putData.ownerId) setDocumentOwnerId(putData.ownerId)
+            }
+          }
+        } catch (wrapErr) {
+          console.warn('Failed to backfill ownerKeyWrapped', wrapErr)
+        }
       }
     } catch (err) {
       console.error('Unlock error:', err)
@@ -1109,6 +1569,7 @@ export default function Home({
     setIsLegacyDocument(false)
     setShowMigrationBanner(false)
     setIsDocumentPrivate(false)
+    setIsPreviewOnly(false)
     setIsPrivacyLocked(false)
     setUserAccessLevel('viewer')
     setHasEditPermission(true)
@@ -1221,9 +1682,25 @@ export default function Home({
       const { ciphertext, iv } = await encryptContent(currentJsonContent, key)
       encryptedPayloadRef.current = { ciphertext, iv }
 
+      let ownerKeyWrapped: string | null = null
+      if (isDocumentPrivate) {
+        ownerKeyWrapped = await buildOwnerKeyWrapped(key, getToken)
+      }
+
+      let token: string | null = null
+      try {
+        token = await getToken()
+      } catch {
+        token = null
+      }
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      }
+      if (token) headers.Authorization = `Bearer ${token}`
+
       const res = await fetch(`/api/share/${documentSlug}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           schemaVersion: 2,
           ciphertext,
@@ -1233,6 +1710,7 @@ export default function Home({
           isPrivate: isDocumentPrivate,
           accessType: userAccessLevel,
           type: documentType,
+          ...(ownerKeyWrapped ? { ownerKeyWrapped } : {}),
         }),
       })
 
@@ -1242,6 +1720,8 @@ export default function Home({
           addOwnership(documentSlug)
         }
         if (isDocumentPrivate) setIsPrivacyLocked(true)
+        if (ownerKeyWrapped) setHasOwnerKeyWrapped(true)
+        if (data.ownerId) setDocumentOwnerId(data.ownerId)
         lastPersistedContentRef.current = currentJsonContent
 
         // If this document was legacy, it is now migrated!
@@ -1501,14 +1981,19 @@ export default function Home({
   }
 
   const executeShareDocument = useCallback(
-    async (settings: {
-      accessLevel: ShareAccessType
-      isPrivateLink: boolean
-      sharePassword?: string
-    }) => {
+    async (
+      settings: {
+        accessLevel: ShareAccessType
+        isPrivateLink: boolean
+        sharePassword?: string
+        previewOnly?: boolean
+      },
+      options?: { copyToClipboard?: boolean }
+    ): Promise<string> => {
       setIsAutoSaving(true)
       const method = documentSlug ? 'PUT' : 'POST'
       const url = documentSlug ? `/api/share/${documentSlug}` : '/api/share'
+      const copyToClipboard = options?.copyToClipboard !== false
 
       try {
         let token: string | null = null
@@ -1544,6 +2029,11 @@ export default function Home({
         const { ciphertext, iv } = await encryptContent(currentJsonContent, key)
         encryptedPayloadRef.current = { ciphertext, iv }
 
+        let ownerKeyWrapped: string | null = null
+        if (settings.isPrivateLink) {
+          ownerKeyWrapped = await buildOwnerKeyWrapped(key, getToken)
+        }
+
         const res = await fetch(url, {
           method,
           headers,
@@ -1555,7 +2045,12 @@ export default function Home({
             mode: currentViewMode,
             isPrivate: settings.isPrivateLink,
             accessType: settings.accessLevel,
+            previewOnly:
+              documentType === 'markdown'
+                ? settings.previewOnly === true
+                : false,
             type: documentType,
+            ...(ownerKeyWrapped ? { ownerKeyWrapped } : {}),
           }),
         })
 
@@ -1593,29 +2088,39 @@ export default function Home({
 
         setUserAccessLevel(settings.accessLevel)
         setIsDocumentPrivate(settings.isPrivateLink)
+        setIsPreviewOnly(
+          documentType === 'markdown' ? settings.previewOnly === true : false
+        )
         if (settings.isPrivateLink) setIsPrivacyLocked(true)
         if (settings.sharePassword) setDocumentPassword(settings.sharePassword)
+        if (ownerKeyWrapped) setHasOwnerKeyWrapped(true)
+        if (data.ownerId) setDocumentOwnerId(data.ownerId)
 
-        // Copy Link (Includes #key=... for public links, clean link for private links)
         const route = `${getEditorBasePath(documentType)}/`
         const fragment = settings.isPrivateLink
           ? ''
           : `#key=${keyString || activeKeyStringRef.current || ''}`
         const link = `${window.location.origin}${route}${newSlug}${fragment}`
-        let message = 'Settings saved and encrypted link copied to clipboard!'
-        try {
-          await navigator.clipboard.writeText(link)
-        } catch (err) {
-          console.warn('Clipboard write failed', err)
-          message = 'Settings saved. Copy your link below!'
+
+        let message = copyToClipboard
+          ? 'Settings saved and encrypted link copied to clipboard!'
+          : 'Share settings saved.'
+        if (copyToClipboard) {
+          try {
+            await navigator.clipboard.writeText(link)
+          } catch (err) {
+            console.warn('Clipboard write failed', err)
+            message = 'Settings saved. Copy your link below!'
+          }
         }
 
-        // Open/display the Share modal so the user can easily see and copy the link
         setIsShareModalOpen(true)
         setToastState({ isOpen: true, message })
+        return link
       } catch (e) {
         console.error(e)
         triggerAlert('Share Failed', (e as Error).message, 'error')
+        throw e
       } finally {
         setIsAutoSaving(false)
       }
@@ -1631,12 +2136,14 @@ export default function Home({
     ]
   )
 
+
   const openAuthModal = useCallback(
     (options?: {
       pendingSettings?: {
         accessLevel: ShareAccessType
         isPrivateLink: boolean
         sharePassword?: string
+        previewOnly?: boolean
       }
       pendingOpenModal?: boolean
     }) => {
@@ -1683,11 +2190,15 @@ export default function Home({
   )
 
   const handleShareDocument = useCallback(
-    async (settings: {
-      accessLevel: ShareAccessType
-      isPrivateLink: boolean
-      sharePassword?: string
-    }) => {
+    async (
+      settings: {
+        accessLevel: ShareAccessType
+        isPrivateLink: boolean
+        sharePassword?: string
+        previewOnly?: boolean
+      },
+      options?: { copyToClipboard?: boolean }
+    ): Promise<string> => {
       if (
         settings.isPrivateLink &&
         (!settings.sharePassword || settings.sharePassword.length < 4)
@@ -1697,13 +2208,13 @@ export default function Home({
           'Password must be at least 4 characters.',
           'error'
         )
-        return
+        throw new Error('Invalid password')
       }
 
       // If user is not authenticated, preserve share settings and trigger Clerk sign-in modal
       if (!isSignedIn) {
         openAuthModal({ pendingSettings: settings })
-        return
+        throw new Error('Authentication required')
       }
 
       pendingShareSettingsRef.current = null
@@ -1715,9 +2226,42 @@ export default function Home({
           console.warn('SessionStorage remove failed', e)
         }
       }
-      await executeShareDocument(settings)
+      return executeShareDocument(settings, options)
     },
     [isSignedIn, openAuthModal, executeShareDocument]
+  )
+
+  const handleSendShareEmail = useCallback(
+    async (payload: {
+      recipientEmail: string
+      shareUrl: string
+      documentTitle: string
+    }) => {
+      let token: string | null = null
+      try {
+        token = await getToken()
+      } catch (e) {
+        console.warn('Failed to retrieve Clerk auth token', e)
+      }
+      if (!token) {
+        throw new Error('Authentication required to send email.')
+      }
+
+      const res = await fetch('/api/share/email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to send email')
+      }
+      return data as { message?: string }
+    },
+    [getToken]
   )
 
   const handleOpenShareModal = useCallback(
@@ -1986,6 +2530,17 @@ export default function Home({
               '',
               newUrl
             )
+
+            patchEditorTabSession(resolvedType, {
+              slug: data.slug,
+              lastPersistedContent: debouncedContentForAutoSave,
+              activeKey: activeKeyRef.current,
+              activeKeyString: keyString ?? null,
+              encryptedPayload: { ciphertext, iv },
+              userAccessLevel: data.accessType || 'editor',
+              hasEditPermission: true,
+              isCurrentUserOwner: true,
+            })
           }
         } catch (e) {
           console.error('Auto-create failed', e)
@@ -2064,7 +2619,7 @@ export default function Home({
           'dark:bg-zinc-950 dark:text-zinc-300 relative'
       )}
     >
-      {isPageLoading && !isPasswordLocked && (
+      {(isPageLoading || isOwnerUnlockPending) && !isPasswordLocked && (
         <div className='absolute inset-0 z-100 flex items-center justify-center pointer-events-none'>
           <JsonRockLoader className='w-14 h-14' />
         </div>
@@ -2083,6 +2638,7 @@ export default function Home({
           onOpenShareModal={handleOpenShareModal}
           onOpenHistoryModal={openHistoryModal}
           currentViewMode={currentViewMode}
+          previewOnlyView={isMarkdownPreviewOnlyShare}
         />
 
         {/* Legacy Document Migration Notice Banner */}
@@ -2148,9 +2704,10 @@ export default function Home({
                   <MarkdownEditor
                     content={currentJsonContent}
                     onChange={onJsonContentChange}
-                    readOnly={!hasEditPermission}
+                    readOnly={!hasEditPermission || isMarkdownPreviewOnlyShare}
                     onFileDrop={processSelectedFile}
                     slug={documentSlug}
+                    sharePreviewOnly={isMarkdownPreviewOnlyShare}
                   />
                 </div>
               ) : documentType === 'html' ? (
@@ -2689,8 +3246,8 @@ export default function Home({
         </div>
       )}
 
-      {/* Unlock Modal */}
-      {isPasswordLocked && !decryptionError && (
+      {/* Unlock Modal — wait for owner-unlock check so owners never see a flash */}
+      {isPasswordLocked && !isOwnerUnlockPending && !decryptionError && (
         <div
           className={cn(
             'fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm p-4',
@@ -2822,9 +3379,21 @@ export default function Home({
         defaultAccessLevel={userAccessLevel}
         defaultIsPrivate={isDocumentPrivate}
         defaultPassword={documentPassword}
+        defaultPreviewOnly={isPreviewOnly}
+        documentType={documentType}
+        documentTitle={deriveDocumentTitle(
+          currentJsonContent,
+          documentType === 'text' ||
+            documentType === 'markdown' ||
+            documentType === 'html' ||
+            documentType === 'json'
+            ? documentType
+            : 'json'
+        )}
         hasPermissionToConfigure={isCurrentUserOwner}
         isPrivacyLocked={isPrivacyLocked}
         onSaveShareSettings={handleShareDocument}
+        onSendShareEmail={handleSendShareEmail}
         isSavingSettings={isAutoSaving}
         shareUrl={
           typeof window !== 'undefined' && documentSlug

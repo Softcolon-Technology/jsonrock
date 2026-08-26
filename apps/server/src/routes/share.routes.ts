@@ -3,13 +3,15 @@ import { rateLimit } from 'express-rate-limit'
 import { upload } from '../utils/multer'
 import { ShareController } from '../controllers/share.controller'
 import { validate } from '../utils/validator.utils'
-import { optionalAuth } from '../middlewares/auth.middleware'
+import { optionalAuth, requireAuth } from '../middlewares/auth.middleware'
 import {
   createShareSchema,
   getShareMetaSchema,
   unlockShareSchema,
   updateShareSchema,
   getRawShareSchema,
+  shareEmailSchema,
+  ownerUnlockSchema,
 } from '../validators/share.validation'
 
 const router: Router = Router()
@@ -58,6 +60,29 @@ router.post(
   writeLimiter,
   validate(createShareSchema),
   shareController.createShare
+)
+
+router.post(
+  '/share/email',
+  writeLimiter,
+  requireAuth,
+  validate(shareEmailSchema),
+  shareController.sendShareEmail
+)
+
+router.get(
+  '/share/key-wrap-secret',
+  readLimiter,
+  requireAuth,
+  shareController.getKeyWrapSecret
+)
+
+router.get(
+  '/share/:slug/owner-unlock',
+  readLimiter,
+  requireAuth,
+  validate(ownerUnlockSchema),
+  shareController.getOwnerUnlock
 )
 
 router.get(

@@ -38,9 +38,11 @@ export const createShareSchema = {
     ciphertext: Joi.string().allow('').optional(),
     iv: Joi.string().allow('').optional(),
     salt: Joi.string().allow('', null).optional(),
+    ownerKeyWrapped: Joi.string().allow('', null).optional(),
     mode: modeSchema,
     isPrivate: Joi.boolean().default(false),
     accessType: accessTypeSchema,
+    previewOnly: Joi.boolean().default(false),
     type: typeSchema,
     slug: Joi.string().max(20).optional(),
   }),
@@ -76,10 +78,37 @@ export const updateShareSchema = {
     ciphertext: Joi.string().allow('').optional(),
     iv: Joi.string().allow('').optional(),
     salt: Joi.string().allow('', null).optional(),
+    ownerKeyWrapped: Joi.string().allow('', null).optional(),
     mode: modeSchema,
     isPrivate: Joi.boolean().default(false),
     accessType: accessTypeSchema,
+    previewOnly: Joi.boolean().optional(),
     type: typeSchema,
+  }),
+}
+
+// Validation schema for POST /api/share/email
+export const shareEmailSchema = {
+  body: Joi.object({
+    recipientEmail: Joi.string().email().required().messages({
+      'string.email': 'A valid recipient email address is required',
+      'any.required': 'Recipient email is required',
+    }),
+    shareUrl: Joi.string()
+      .pattern(/^https?:\/\/\S+$/i)
+      .required()
+      .messages({
+        'string.pattern.base': 'A valid share URL is required',
+        'any.required': 'Share URL is required',
+      }),
+    documentTitle: Joi.string().max(200).allow('').default('Untitled document'),
+  }),
+}
+
+// Validation schema for GET /api/share/:slug/owner-unlock
+export const ownerUnlockSchema = {
+  params: Joi.object({
+    slug: slugSchema,
   }),
 }
 

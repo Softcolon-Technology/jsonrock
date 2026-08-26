@@ -121,7 +121,8 @@ export async function deriveKeyFromPassword(
     },
     baseKey,
     { name: 'AES-GCM', length: 256 },
-    false,
+    // Extractable so owners can wrap the content key for cross-device unlock.
+    true,
     ['encrypt', 'decrypt']
   )
 }
@@ -194,6 +195,107 @@ export async function decryptContent(
 
   const decoder = new TextDecoder()
   return decoder.decode(decryptedBuffer)
+}
+
+const OWNER_WRAP_SALT = new TextEncoder().encode('jsonrock-owner-wrap-v1')
+
+/**
+ * Derives an AES-256-GCM wrapping key from the per-user secret returned by the
+ * authenticated key-wrap endpoints (never from the document password).
+ */
+export async function deriveWrappingKeyFromUserSecret(
+  secretBase64: string
+): Promise<CryptoKey> {
+  if (typeof window === 'undefined' || !window.crypto?.subtle) {
+    throw new Error('Web Crypto API is not available')
+  }
+
+  const secretBytes = base64ToBuffer(secretBase64)
+  const baseKey = await window.crypto.subtle.importKey(
+    'raw',
+    secretBytes as unknown as BufferSource,
+    'HKDF',
+    false,
+    ['deriveKey']
+  )
+
+  return window.crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: OWNER_WRAP_SALT,
+      info: new Uint8Array(),
+    },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  )
+}
+
+/**
+ * Wraps (encrypts) a document content key for owner recovery.
+ * Returns a JSON string `{ciphertext, iv}` suitable for `ownerKeyWrapped`.
+ */
+export async function wrapContentKey(
+  contentKey: CryptoKey,
+  wrappingKey: CryptoKey
+): Promise<string> {
+  if (typeof window === 'undefined' || !window.crypto?.subtle) {
+    throw new Error('Web Crypto API is not available')
+  }
+
+  const rawKey = await window.crypto.subtle.exportKey('raw', contentKey)
+  const iv = new Uint8Array(12)
+  window.crypto.getRandomValues(iv)
+
+  const wrapped = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv as unknown as BufferSource },
+    wrappingKey,
+    rawKey
+  )
+
+  return JSON.stringify({
+    ciphertext: bufferToBase64(wrapped),
+    iv: bufferToBase64(iv),
+  })
+}
+
+/**
+ * Unwraps an `ownerKeyWrapped` payload into an AES-GCM content CryptoKey.
+ */
+export async function unwrapContentKey(
+  ownerKeyWrapped: string,
+  wrappingKey: CryptoKey
+): Promise<CryptoKey> {
+  if (typeof window === 'undefined' || !window.crypto?.subtle) {
+    throw new Error('Web Crypto API is not available')
+  }
+
+  const parsed = JSON.parse(ownerKeyWrapped) as {
+    ciphertext?: string
+    iv?: string
+  }
+  if (!parsed.ciphertext || !parsed.iv) {
+    throw new Error('Invalid ownerKeyWrapped payload')
+  }
+
+  const ciphertext = base64ToBuffer(parsed.ciphertext)
+  const iv = base64ToBuffer(parsed.iv)
+
+  const rawKey = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: iv as unknown as BufferSource },
+    wrappingKey,
+    ciphertext as unknown as BufferSource
+  )
+
+  return window.crypto.subtle.importKey(
+    'raw',
+    rawKey,
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  )
 }
 
 /**

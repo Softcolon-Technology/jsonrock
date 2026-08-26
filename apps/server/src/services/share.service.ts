@@ -15,9 +15,11 @@ interface CreateShareInput {
   ciphertext?: string
   iv?: string
   salt?: string
+  ownerKeyWrapped?: string | null
   mode?: JsonShareMode
   isPrivate: boolean
   accessType?: ShareAccessType
+  previewOnly?: boolean
   type?: ShareType
   slug?: string
   ownerId?: string
@@ -62,9 +64,14 @@ export class ShareService {
       ciphertext: input.ciphertext || '',
       iv: input.iv || '',
       salt: input.salt || undefined,
+      ownerKeyWrapped:
+        input.isPrivate && input.ownerKeyWrapped
+          ? input.ownerKeyWrapped
+          : undefined,
       mode: input.mode || ModeEnum.FORMATTER,
       isPrivate: input.isPrivate,
       accessType: input.accessType || AccessTypeEnum.VIEWER,
+      previewOnly: input.previewOnly === true,
     })
 
     return shareLink.save()
@@ -82,6 +89,10 @@ export class ShareService {
       mode: input.mode,
       isPrivate: input.isPrivate,
       accessType: input.accessType || AccessTypeEnum.VIEWER,
+    }
+
+    if (input.previewOnly !== undefined) {
+      updateDoc.previewOnly = input.previewOnly === true
     }
 
     if (input.ownerId !== undefined) {
@@ -106,6 +117,13 @@ export class ShareService {
 
     if (input.type) {
       updateDoc.type = input.type
+    }
+
+    // Public docs never keep an owner wrap; private docs update only when provided.
+    if (input.isPrivate === false) {
+      updateDoc.ownerKeyWrapped = null
+    } else if (input.ownerKeyWrapped !== undefined) {
+      updateDoc.ownerKeyWrapped = input.ownerKeyWrapped
     }
 
     // When upgrading/saving a document as schemaVersion 2 (E2EE), explicitly clear legacy plaintext & passwordHash

@@ -44,6 +44,8 @@ interface Props {
   onOpenShareModal: (x: boolean) => void
   onOpenUploadModal: (x: boolean) => void
   onOpenHistoryModal: (x: boolean) => void
+  /** Shared markdown preview-only: hide editor creation nav; show view-only cue. */
+  previewOnlyView?: boolean
 }
 
 type HeaderAction = {
@@ -115,6 +117,7 @@ const EditorHeader = ({
   onOpenShareModal,
   currentViewMode,
   onOpenHistoryModal,
+  previewOnlyView = false,
 }: Props) => {
   const { isSignedIn, isLoaded: isUserLoaded } = useUser()
   const [isPending, startTransition] = useTransition()
@@ -345,48 +348,56 @@ const EditorHeader = ({
         />
       </div>
 
-      {/* Center: always space-aware — buttons leave Other when they fit */}
-      <div className='absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-2'>
-        {visibleActions.map((action) => (
-          <EditorActionBtn
-            key={action.id}
-            href={action.href}
-            documentType={documentType}
-            label={action.label}
-            title={action.title}
-            icon={action.icon}
-            isActive={
-              action.activeType !== undefined &&
-              documentType === action.activeType
-            }
-          />
-        ))}
-
-        {showOther && (
-          <button
-            ref={otherBtnRef}
-            type='button'
-            onClick={() => {
-              updateMenuPosition()
-              setIsOtherOpen((open) => !open)
-            }}
-            aria-expanded={isOtherOpen}
-            aria-haspopup='menu'
-            aria-label='Other tools'
-            className={otherTriggerClass}
-          >
-            <MoreHorizontal size={14} />
-            <span className='hidden lg:inline'>Other</span>
-            <ChevronDown
-              size={12}
-              className={cn(
-                'transition-transform',
-                isOtherOpen && 'rotate-180'
-              )}
+      {/* Center: editor nav — hidden for preview-only shared markdown */}
+      {previewOnlyView ? (
+        <div className='absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2'>
+          <span className='text-xs font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500'>
+            View only
+          </span>
+        </div>
+      ) : (
+        <div className='absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-2'>
+          {visibleActions.map((action) => (
+            <EditorActionBtn
+              key={action.id}
+              href={action.href}
+              documentType={documentType}
+              label={action.label}
+              title={action.title}
+              icon={action.icon}
+              isActive={
+                action.activeType !== undefined &&
+                documentType === action.activeType
+              }
             />
-          </button>
-        )}
-      </div>
+          ))}
+
+          {showOther && (
+            <button
+              ref={otherBtnRef}
+              type='button'
+              onClick={() => {
+                updateMenuPosition()
+                setIsOtherOpen((open) => !open)
+              }}
+              aria-expanded={isOtherOpen}
+              aria-haspopup='menu'
+              aria-label='Other tools'
+              className={otherTriggerClass}
+            >
+              <MoreHorizontal size={14} />
+              <span className='hidden lg:inline'>Other</span>
+              <ChevronDown
+                size={12}
+                className={cn(
+                  'transition-transform',
+                  isOtherOpen && 'rotate-180'
+                )}
+              />
+            </button>
+          )}
+        </div>
+      )}
 
       {mounted &&
         isOtherOpen &&
