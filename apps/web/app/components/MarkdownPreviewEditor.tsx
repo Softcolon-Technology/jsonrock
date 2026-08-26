@@ -6,6 +6,10 @@ import { StarterKit } from '@tiptap/starter-kit'
 import { Markdown } from '@tiptap/markdown'
 import { Link as TiptapLink } from '@tiptap/extension-link'
 import { Placeholder } from '@tiptap/extension-placeholder'
+import { Table } from '@tiptap/extension-table'
+import { TableRow } from '@tiptap/extension-table-row'
+import { TableCell } from '@tiptap/extension-table-cell'
+import { TableHeader } from '@tiptap/extension-table-header'
 import {
   Bold,
   Italic,
@@ -304,6 +308,8 @@ export default function MarkdownPreviewEditor({
     immediatelyRender: false,
     extensions: [
       StarterKit.configure({
+        // StarterKit ships Link; we configure our own below.
+        link: false,
         heading: { levels: [1, 2, 3, 4, 5, 6] },
         codeBlock: {
           HTMLAttributes: {
@@ -332,6 +338,31 @@ export default function MarkdownPreviewEditor({
             class:
               'px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800/50 text-emerald-600 dark:text-emerald-400 font-mono text-[0.875em] border border-zinc-200 dark:border-zinc-700/50',
           },
+        },
+      }),
+      // GFM pipe tables — required for @tiptap/markdown table tokens.
+      Table.configure({
+        resizable: true,
+        HTMLAttributes: {
+          class:
+            'border-collapse table-fixed w-full border border-zinc-300 dark:border-zinc-700 my-4',
+        },
+      }),
+      TableRow.configure({
+        HTMLAttributes: {
+          class: 'border-b border-zinc-300 dark:border-zinc-700',
+        },
+      }),
+      TableHeader.configure({
+        HTMLAttributes: {
+          class:
+            'border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 px-3 py-2 text-left font-semibold relative',
+        },
+      }),
+      TableCell.configure({
+        HTMLAttributes: {
+          class:
+            'border border-zinc-300 dark:border-zinc-700 px-3 py-2 relative',
         },
       }),
       TiptapLink.configure({
