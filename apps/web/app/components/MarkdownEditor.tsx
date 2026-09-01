@@ -367,12 +367,90 @@ const handleMarkdownDownload = async (
   URL.revokeObjectURL(url)
 }
 
+/** Strip `dark` so Tailwind `dark:` variants and `.dark` rules don't apply in exports. */
+const stripDarkClass = (className: string) =>
+  className
+    .replace(/\bdark\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/**
+ * Light-mode markdown colors for PDF/DOC export.
+ * Print/PDF always renders on a white page — never inherit app dark-theme colors.
+ */
+const MARKDOWN_EXPORT_LIGHT_STYLES = `
+  html, body {
+    background-color: #ffffff !important;
+    color: #3f3f46;
+  }
+  h1 { color: #18181b; border-bottom-color: #e4e4e7; }
+  h2 { color: #27272a; border-bottom-color: #e4e4e7; }
+  h3, h4, h5 { color: #27272a; }
+  h6 { color: #71717a; }
+  p, li, em, td, th { color: #3f3f46; }
+  blockquote {
+    background-color: #ecfdf5 !important;
+    border-left-color: #10b981 !important;
+    color: #52525b !important;
+  }
+  strong { color: #18181b; }
+  a { color: #059669; }
+  code:not(pre code) {
+    background-color: #f4f4f5 !important;
+    color: #059669 !important;
+    border-color: #e4e4e7 !important;
+  }
+  hr { border-color: #e4e4e7; }
+  thead { background-color: #f4f4f5; color: #71717a; }
+  table { color: #3f3f46; }
+  tr { background-color: #ffffff; }
+  del { color: #a1a1aa; }
+`
+
+const MARKDOWN_EXPORT_PRINT_STYLES = `
+  @media print {
+    @page { margin: 0; }
+    html, body {
+      background-color: #ffffff !important;
+      color: #3f3f46 !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body { margin: 0; padding: 15mm; }
+    * { overflow: visible !important; }
+    h1 { color: #18181b !important; border-bottom-color: #e4e4e7 !important; }
+    h2 { color: #27272a !important; border-bottom-color: #e4e4e7 !important; }
+    h3, h4, h5 { color: #27272a !important; }
+    h6 { color: #71717a !important; }
+    p, li, em, td, th { color: #3f3f46 !important; }
+    blockquote {
+      background-color: #ecfdf5 !important;
+      border-left-color: #10b981 !important;
+      color: #52525b !important;
+    }
+    strong { color: #18181b !important; }
+    a { color: #059669 !important; }
+    code:not(pre code) {
+      background-color: #f4f4f5 !important;
+      color: #059669 !important;
+      border-color: #e4e4e7 !important;
+    }
+    hr { border-color: #e4e4e7 !important; }
+    thead { background-color: #f4f4f5 !important; color: #71717a !important; }
+    table { color: #3f3f46 !important; }
+    tr { background-color: #ffffff !important; }
+    del { color: #a1a1aa !important; }
+  }
+`
+
 const handleDocDownload = async (
   htmlContent: string,
   requestedFilename: string
 ) => {
   const header =
-    "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export Document</title></head><body>"
+    "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export Document</title><style>" +
+    MARKDOWN_EXPORT_LIGHT_STYLES +
+    '</style></head><body>'
   const footer = '</body></html>'
   const sourceHTML = header + htmlContent + footer
   let filePicked = false
@@ -431,23 +509,19 @@ const handlePdfDownload = async (
     )
       .map((s) => s.outerHTML)
       .join('\n')
-    const isDark = document.documentElement.classList.contains('dark')
-    const bgClass = isDark ? 'bg-[#0a0a0a]' : 'bg-white'
+    const lightClassName = stripDarkClass(document.documentElement.className)
     const title = requestedFilename.replace(/\.pdf$/, '')
     doc.write(`
-      <html>
+      <html class="${lightClassName}">
         <head>
           <title>${title}</title>
           ${styles}
           <style>
-            @media print {
-              @page { margin: 0; }
-              body { margin: 0; padding: 15mm; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background-color: ${isDark ? '#0a0a0a' : '#ffffff'} !important; }
-              * { overflow: visible !important; }
-            }
+            ${MARKDOWN_EXPORT_LIGHT_STYLES}
+            ${MARKDOWN_EXPORT_PRINT_STYLES}
           </style>
         </head>
-        <body class="${document.documentElement.className} ${bgClass}">
+        <body class="${lightClassName} bg-white">
           <div class="p-8">${element.innerHTML}</div>
         </body>
       </html>
