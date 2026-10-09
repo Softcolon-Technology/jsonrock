@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono, Space_Grotesk } from 'next/font/google'
 import './globals.css'
 import { ThemeProvider } from './components/theme-provider'
+import { FeatureAnnouncementModal } from './components/FeatureAnnouncementModal'
 import ScrollToTop from '@/components/scroll-to-top'
 import Script from 'next/script'
 import { ClerkProvider } from '@clerk/nextjs'
@@ -48,7 +49,10 @@ export default function RootLayout({
             crossOrigin='anonymous'
             strategy='afterInteractive'
           />
-          <meta name="google-adsense-account" content="ca-pub-3686223382827680"/>
+          <meta
+            name='google-adsense-account'
+            content='ca-pub-3686223382827680'
+          />
         </head>
         <body
           className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} antialiased`}
@@ -117,6 +121,7 @@ export default function RootLayout({
               }}
             />
             {children}
+            <FeatureAnnouncementModal />
             <ScrollToTop />
           </ThemeProvider>
         </body>
