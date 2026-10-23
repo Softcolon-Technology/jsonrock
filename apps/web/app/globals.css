@@ -21,9 +21,43 @@
   --font-space-grotesk: var(--font-space-grotesk);
 }
 
+/* JsonRock library / projects design tokens — flipped by AccountMenu theme toggle */
+:root {
+  --jr-bg: #f8fafc;
+  --jr-surface: #ffffff;
+  --jr-border: #e2e8f0;
+  --jr-text: #0f172a;
+  --jr-text-2: #475569;
+  --jr-muted: #64748b;
+  --jr-muted-2: #94a3b8;
+  --jr-hover: #f1f5f9;
+  --jr-accent: #00b3b7;
+  --jr-accent-hover: #009ea1;
+  --jr-accent-soft: #e6f8f8;
+  --jr-danger: #b91c1c;
+  --jr-danger-soft: #fef2f2;
+  --jr-code-bg: #0f172a;
+  --jr-code-text: #e2e8f0;
+}
+
 .dark {
   --background: #0a0a0a;
   --foreground: #ededed;
+  --jr-bg: #09090b;
+  --jr-surface: #18181b;
+  --jr-border: #27272a;
+  --jr-text: #fafafa;
+  --jr-text-2: #a1a1aa;
+  --jr-muted: #a1a1aa;
+  --jr-muted-2: #71717a;
+  --jr-hover: #27272a;
+  --jr-accent: #00b3b7;
+  --jr-accent-hover: #5ed4d7;
+  --jr-accent-soft: rgba(0, 179, 183, 0.15);
+  --jr-danger: #f87171;
+  --jr-danger-soft: rgba(185, 28, 28, 0.25);
+  --jr-code-bg: #09090b;
+  --jr-code-text: #e4e4e7;
 }
 
 .glass-card {
@@ -54,8 +88,8 @@
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--jr-bg);
+  color: var(--jr-text);
   /* font-family: Arial, Helvetica, sans-serif; */
   font-family: var(--font-space-grotesk);
 }

@@ -8,6 +8,6 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
-export default function AccountMcpPage() {
+export default function McpPage() {
   return <McpTokensPage />
 }

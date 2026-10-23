@@ -43,7 +43,7 @@ export function FeatureAnnouncementModal() {
         aria-describedby='feature-announcement-message'
       >
         <div className='pointer-events-none absolute -right-28 -top-28 h-72 w-72 rounded-full bg-[#00B3B7]/25 blur-3xl' />
-        <div className='pointer-events-none absolute -bottom-40 left-1/3 h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl' />
+        <div className='pointer-events-none absolute -bottom-40 left-1/3 h-72 w-72 rounded-full bg-[#00B3B7]/10 blur-3xl' />
 
         <button
           type='button'
@@ -69,7 +69,7 @@ export function FeatureAnnouncementModal() {
               </div>
             ) : null}
             {announcement.eyebrow ? (
-              <span className='rounded-full border border-[#00B3B7]/30 bg-[#00B3B7]/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-cyan-300'>
+              <span className='rounded-full border border-[#00B3B7]/30 bg-[#00B3B7]/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-[#00B3B7]'>
                 {announcement.eyebrow}
               </span>
             ) : null}

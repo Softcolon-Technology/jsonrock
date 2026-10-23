@@ -7,6 +7,11 @@ import { connectDB } from './db/conn'
 import shareRoutes from './routes/share.routes'
 import webhookRoutes from './routes/webhook.routes'
 import mcpTokenRoutes from './routes/mcp-token.routes'
+import filesRoutes from './routes/files.routes'
+import projectRoutes from './routes/project.routes'
+import labelRoutes, { fileLabelsRouter } from './routes/label.routes'
+import { verifyToken } from '@clerk/backend'
+import { setIo, userRoom } from './lib/socket-registry'
 import { createMcpRouter } from './mcp/http'
 import morgan from 'morgan'
 import logger from './config/logger'
@@ -18,6 +23,16 @@ dotenv.config()
 const app = express()
 const httpServer = createServer(app)
 const PORT = process.env.PORT || 3005
+
+// Next.js `/api` rewrites (and production reverse proxies) set X-Forwarded-For.
+// Trust one hop so express-rate-limit keys by the real client IP instead of
+// logging ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+// https://express-rate-limit.github.io/ERR_ERL_UNEXPECTED_X_FORWARDED_FOR/
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS)
+app.set(
+  'trust proxy',
+  Number.isFinite(trustProxyHops) && trustProxyHops >= 0 ? trustProxyHops : 1
+)
 
 app.use(cors())
 
@@ -32,6 +47,10 @@ app.use(morgan('dev'))
 // Routes. MCP token routes are mounted before the share router so /api/mcp
 // is not captured by the share slug handler.
 app.use('/api/mcp', mcpTokenRoutes)
+app.use('/api/files', filesRoutes)
+app.use('/api/files', fileLabelsRouter)
+app.use('/api/labels', labelRoutes)
+app.use('/api/projects', projectRoutes)
 app.use('/api', shareRoutes)
 app.use('/mcp', createMcpRouter())
 
@@ -45,6 +64,21 @@ const io = new Server(httpServer, {
     methods: ['GET', 'POST'],
   },
 })
+
+setIo(io)
+
+/** Verify a Clerk session JWT and return the Clerk user id (or null). */
+async function verifySocketToken(token: unknown): Promise<string | null> {
+  const secretKey = process.env.CLERK_SECRET_KEY
+  if (!secretKey || typeof token !== 'string' || !token) return null
+  try {
+    const verified = await verifyToken(token, { secretKey })
+    return verified?.sub ?? null
+  } catch (error) {
+    logger.warn('Socket Clerk token verification failed', error)
+    return null
+  }
+}
 
 // CRITICAL FIX #1: Add Rate Limiter to prevent spam
 interface RateLimitEntry {
@@ -89,7 +123,29 @@ function checkRateLimit(socketId: string): boolean {
 io.on('connection', (socket) => {
   // console.log("New client connected", socket.id);
 
+  // Authenticated private room (`user:{clerkUserId}`) for project invites.
+  // Client emits: socket.emit('auth/join', room, { token }). The room is derived
+  // from the verified token, never trusted from the client.
+  socket.on('auth/join', async (...args: unknown[]) => {
+    if (!checkRateLimit(socket.id)) return
+    const payload = args.find(
+      (a): a is { token?: unknown } => typeof a === 'object' && a !== null
+    )
+    const token =
+      payload?.token ??
+      (socket.handshake.auth as { token?: unknown } | undefined)?.token
+    const userId = await verifySocketToken(token)
+    if (!userId) {
+      socket.emit('auth/error', { message: 'Invalid or missing auth token' })
+      return
+    }
+    socket.join(userRoom(userId))
+    socket.emit('auth/joined', { room: userRoom(userId) })
+  })
+
   socket.on('join-room', (slug: string) => {
+    // Private user rooms can only be joined through the verified auth/join event.
+    if (typeof slug !== 'string' || slug.startsWith('user:')) return
     socket.join(slug)
     // console.log(`Client ${socket.id} joined room ${slug}`);
   })

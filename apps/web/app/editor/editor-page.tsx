@@ -19,7 +19,13 @@ import {
   Eye,
   EyeOff,
   PanelLeftOpen,
+  WrapText,
 } from 'lucide-react'
+import {
+  readWordWrapPreference,
+  writeWordWrapPreference,
+  WORD_WRAP_CHANGE_EVENT,
+} from '@/lib/editor-word-wrap'
 
 import { getJsonParseError } from '@/lib/json-error'
 
@@ -29,6 +35,10 @@ import { ModalAlert } from '../components/ui/ModalAlert'
 import { Toast } from '../components/ui/Toast'
 import { SharePopover } from '../components/SharePopover'
 import LocalHistoryModal from '../components/editor/local-history-modal'
+import { FilesModal } from '../components/editor/files-modal/files-modal'
+import { InviteProvider } from '../components/invites/invite-provider'
+import { isProjectsEnabled } from '@/lib/feature-flags'
+import { useRemoteFile } from '@/hooks/use-remote-file'
 import Cookies from 'js-cookie'
 import { JsonRockLoader } from '../components/Loader'
 
@@ -52,17 +62,24 @@ import { cn } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
 import dynamic from 'next/dynamic'
 import EditorHeader from '../components/editor/editor-header'
-import { ShareType, getEditorBasePath, buildDocumentUrl } from '../iterface'
+import {
+  ShareType,
+  getEditorBasePath,
+  buildDocumentUrl,
+  projectIdFromWorkspaceFilePath,
+} from '../iterface'
 import {
   clearLocalDocuments,
+  DEFAULT_DOCUMENT_TITLE,
   deleteLocalDocumentBySlug,
-  deriveDocumentTitle,
   getLocalDocumentBySlug,
   listLocalDocuments,
   LocalDocumentRecord,
   saveLocalDocument,
   updateLocalDocumentTitle,
 } from '@/lib/local-docs'
+import { takePendingDocumentTitle } from '@/hooks/use-document-title'
+import { renameFile } from '@/lib/api/files'
 import {
   EditorTabSnapshot,
   getEditorTabSession,
@@ -82,6 +99,7 @@ import {
 import {
   buildOwnerKeyWrapped,
   tryOwnerUnwrapContentKey,
+  tryRecoverContentKeyString,
 } from '@/lib/owner-key-wrap'
 import { useUser, useAuth, useClerk } from '@clerk/nextjs'
 
@@ -198,6 +216,9 @@ type SerializedShareLinkRecord = Omit<ShareLinkRecord, 'createdAt' | '_id'> & {
   hasOwnerKeyWrapped?: boolean
 }
 
+// Flag on: Files modal (Remote | This device) wraps the same local-history body.
+const HistoryModal = isProjectsEnabled ? FilesModal : LocalHistoryModal
+
 interface HomeProps {
   initialRecord?: SerializedShareLinkRecord
   featureMode?: ShareType
@@ -214,6 +235,19 @@ export default function Home({
 
   const paramView = searchParams?.get('view') as JsonShareMode | undefined
   const paramType = searchParams?.get('type') as ShareType | undefined
+  /** From "New file in project" — attach the first created share to this project. */
+  const pendingProjectIdRef = React.useRef<string | null>(
+    searchParams?.get('projectId') || null
+  )
+  /** Project id for in-app `/workspace/projects/…` URLs (synced from remote meta). */
+  const remoteProjectIdRef = React.useRef<string | null>(null)
+
+  const navProjectId = React.useCallback((): string | null => {
+    if (remoteProjectIdRef.current) return remoteProjectIdRef.current
+    if (pendingProjectIdRef.current) return pendingProjectIdRef.current
+    if (typeof window === 'undefined') return null
+    return projectIdFromWorkspaceFilePath(window.location.pathname)
+  }, [])
 
   // Determine effective initial values
   // paramView (URL param) takes priority over DB stored mode — URL represents explicit user intent
@@ -256,6 +290,52 @@ export default function Home({
   const { isSignedIn, isLoaded: isUserLoaded } = useUser()
   const { getToken, isLoaded: isAuthLoaded, userId: clerkUserId } = useAuth()
   const { openSignIn } = useClerk()
+
+  /** Move a freshly created share into the pending project (once). */
+  const attachPendingProject = useCallback(
+    async (slug: string) => {
+      const projectId = pendingProjectIdRef.current
+      if (!projectId || !slug) return
+      try {
+        const token = await getToken()
+        if (!token) return
+        const res = await fetch(`/api/share/${encodeURIComponent(slug)}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ projectId }),
+        })
+        if (!res.ok) {
+          console.warn(
+            'Failed to attach file to project',
+            await res.text().catch(() => res.status)
+          )
+          return
+        }
+        pendingProjectIdRef.current = null
+        // Drop ?projectId= so refresh doesn't re-attach later docs.
+        try {
+          const url = new URL(window.location.href)
+          if (url.searchParams.has('projectId')) {
+            url.searchParams.delete('projectId')
+            const next = `${url.pathname}${url.search}${url.hash}`
+            window.history.replaceState(
+              { ...window.history.state, as: next, url: next },
+              '',
+              next
+            )
+          }
+        } catch {
+          // ignore URL cleanup errors
+        }
+      } catch (e) {
+        console.warn('Failed to attach file to project', e)
+      }
+    },
+    [getToken]
+  )
 
   // [AUTH-DEBUG] TEMP — every render (do not remove until live diagnosis complete)
   console.log(Date.now(), 'auth state: editor-page', {
@@ -402,6 +482,18 @@ export default function Home({
   )
 
   const [indentationSize, setIndentationSize] = useState<string>('2')
+  const [wordWrapEnabled, setWordWrapEnabled] = useState(false)
+
+  useEffect(() => {
+    setWordWrapEnabled(readWordWrapPreference())
+    const sync = () => setWordWrapEnabled(readWordWrapPreference())
+    window.addEventListener(WORD_WRAP_CHANGE_EVENT, sync)
+    window.addEventListener('storage', sync)
+    return () => {
+      window.removeEventListener(WORD_WRAP_CHANGE_EVENT, sync)
+      window.removeEventListener('storage', sync)
+    }
+  }, [])
 
   // Loading State
   const [isPageLoading, setIsPageLoading] = useState(
@@ -412,6 +504,8 @@ export default function Home({
   const [documentSlug, setDocumentSlug] = useState<string | null>(
     initialRecord?.slug || cachedRootSession?.slug || null
   )
+  const { project: remoteProject, file: remoteFile } =
+    useRemoteFile(documentSlug)
   const [isDocumentPrivate, setIsDocumentPrivate] = useState(
     cachedRootSession?.isDocumentPrivate ?? (initialRecord?.isPrivate || false)
   )
@@ -460,29 +554,33 @@ export default function Home({
   const [hasEditPermission, setHasEditPermission] = useState(() => {
     if (cachedRootSession) return cachedRootSession.hasEditPermission
     if (!initialRecord?.slug) return true // New document - always editable
-    const isOwned = checkOwnership(initialRecord.slug)
-    if (isOwned) return true // Owner always can edit
-    return initialRecord.accessType === 'editor' // Non-owner: check accessType
+    // Share links are view-only; owners edit via ownership / Workspace role.
+    return checkOwnership(initialRecord.slug)
   })
 
-  // Account ownership is canonical for documents created outside this browser
-  // (for example through the JSON Rock MCP server). The local owned-slugs cookie
-  // is only a fallback for anonymous and legacy documents.
+  // Edit requires Workspace membership (owner/editor) or being the document
+  // owner — share links are view-only and never grant edit via accessType.
   useEffect(() => {
-    if (!isAuthLoaded || !isUserLoaded || !documentOwnerId) return
+    if (!isAuthLoaded || !isUserLoaded) return
 
     const ownsDocument = Boolean(
-      isSignedIn && clerkUserId && clerkUserId === documentOwnerId
+      isSignedIn &&
+      ((documentOwnerId && clerkUserId === documentOwnerId) ||
+        (documentSlug && checkOwnership(documentSlug)))
     )
-    setIsCurrentUserOwner(ownsDocument)
-    setHasEditPermission(ownsDocument || userAccessLevel === 'editor')
+    const workspaceCanEdit =
+      remoteFile?.role === 'owner' || remoteFile?.role === 'editor'
+    setIsCurrentUserOwner(ownsDocument || remoteFile?.role === 'owner')
+    setHasEditPermission(ownsDocument || workspaceCanEdit)
   }, [
     isAuthLoaded,
     isUserLoaded,
     isSignedIn,
     clerkUserId,
     documentOwnerId,
-    userAccessLevel,
+    documentSlug,
+    remoteFile?.role,
+    checkOwnership,
   ])
 
   const [documentPassword, setDocumentPassword] = useState(
@@ -588,13 +686,23 @@ export default function Home({
       setCurrentViewMode(paramView || data.mode || 'visualize')
 
       if (data.slug) {
-        const isOwned = checkOwnership(data.slug)
-        if (isOwned) {
-          setIsCurrentUserOwner(true)
+        const cookieOwned = checkOwnership(data.slug)
+        const clerkOwned = Boolean(
+          isSignedIn &&
+          data.ownerId &&
+          clerkUserId &&
+          clerkUserId === data.ownerId
+        )
+        const workspaceCanEdit =
+          remoteFile?.role === 'owner' || remoteFile?.role === 'editor'
+        // Promote edit when we know ownership; never downgrade to false here —
+        // createRemoteFile opens before the ownership cookie is written, and the
+        // Clerk/project-role effect is the source of truth for signed-in users.
+        if (cookieOwned || clerkOwned || workspaceCanEdit) {
+          setIsCurrentUserOwner(
+            cookieOwned || clerkOwned || remoteFile?.role === 'owner'
+          )
           setHasEditPermission(true)
-        } else {
-          setHasEditPermission(data.accessType === 'editor')
-          setIsCurrentUserOwner(false)
         }
       } else {
         setIsCurrentUserOwner(true)
@@ -677,7 +785,14 @@ export default function Home({
           activeKeyRef.current = key
           setIsOwnerUnlockPending(false)
         } else {
-          const keyString = extractKeyFromFragment()
+          let keyString = extractKeyFromFragment()
+          if (!keyString) {
+            const slugForKey = data.slug || urlSlug || null
+            if (slugForKey) {
+              keyString = await tryRecoverContentKeyString(slugForKey, getToken)
+              if (keyString) setKeyInFragment(keyString)
+            }
+          }
           if (!keyString) {
             setDecryptionError(
               'This document is end-to-end encrypted, but no encryption key was found in the link. Please ensure your link includes the #key=... fragment.'
@@ -711,8 +826,64 @@ export default function Home({
         setIsDecrypting(false)
       }
     },
-    [checkOwnership, documentPassword, paramView]
+    [
+      checkOwnership,
+      documentPassword,
+      paramView,
+      getToken,
+      urlSlug,
+      isSignedIn,
+      clerkUserId,
+      remoteFile?.role,
+    ]
   )
+
+  // Retry decrypt once auth is ready (library/project opens have no #key= until recovery).
+  const contentKeyRetryRef = React.useRef<string | null>(null)
+  useEffect(() => {
+    if (!decryptionError) return
+    if (!isAuthLoaded || !isSignedIn) return
+    const slug = documentSlug || urlSlug || initialRecord?.slug || null
+    if (!slug || contentKeyRetryRef.current === slug) return
+    const payload = encryptedPayloadRef.current
+    if (!payload?.ciphertext || !payload?.iv) return
+    if (isDocumentPrivate) return
+
+    contentKeyRetryRef.current = slug
+    ;(async () => {
+      const keyString = await tryRecoverContentKeyString(slug, getToken)
+      if (!keyString) return
+      try {
+        setKeyInFragment(keyString)
+        const key = await importKeyFromFragment(keyString)
+        const plaintext = await decryptContent(
+          payload.ciphertext,
+          payload.iv,
+          key
+        )
+        activeKeyRef.current = key
+        activeKeyStringRef.current = keyString
+        setCurrentJsonContent(plaintext)
+        setSyncedRemoteContent({ code: plaintext, nonce: Date.now() })
+        lastPersistedContentRef.current = plaintext
+        setDecryptionError(null)
+        setIsPasswordLocked(false)
+        setIsPrivacyLocked(false)
+      } catch (err) {
+        console.error('Content key recovery decrypt failed:', err)
+        contentKeyRetryRef.current = null
+      }
+    })()
+  }, [
+    decryptionError,
+    isAuthLoaded,
+    isSignedIn,
+    documentSlug,
+    urlSlug,
+    initialRecord?.slug,
+    isDocumentPrivate,
+    getToken,
+  ])
 
   // Owner bypass: unwrap content key via authenticated endpoint before password UI
   useEffect(() => {
@@ -848,27 +1019,31 @@ export default function Home({
   const lastRootNavKeyRef = React.useRef<string | null>(null)
   const hydratedFromCacheRef = React.useRef(!!cachedRootSession)
 
-  const restoreSessionUrl = useCallback((snapshot: EditorTabSnapshot) => {
-    if (typeof window === 'undefined' || !snapshot.slug) return
+  const restoreSessionUrl = useCallback(
+    (snapshot: EditorTabSnapshot) => {
+      if (typeof window === 'undefined' || !snapshot.slug) return
 
-    const newUrl = buildDocumentUrl({
-      type: snapshot.type,
-      slug: snapshot.slug,
-      viewMode: snapshot.viewMode,
-      keyString: snapshot.activeKeyString,
-    })
+      const newUrl = buildDocumentUrl({
+        type: snapshot.type,
+        slug: snapshot.slug,
+        viewMode: snapshot.viewMode,
+        keyString: snapshot.activeKeyString,
+        projectId: navProjectId(),
+      })
 
-    const currentPath = window.location.pathname.replace(/\/$/, '') || '/'
-    const basePath = getEditorBasePath(snapshot.type)
-    if (currentPath === basePath) {
-      justAutoSavedSlugRef.current = snapshot.slug
-      window.history.replaceState(
-        { ...window.history.state, as: newUrl, url: newUrl },
-        '',
-        newUrl
-      )
-    }
-  }, [])
+      const currentPath = window.location.pathname.replace(/\/$/, '') || '/'
+      const basePath = getEditorBasePath(snapshot.type)
+      if (currentPath === basePath) {
+        justAutoSavedSlugRef.current = snapshot.slug
+        window.history.replaceState(
+          { ...window.history.state, as: newUrl, url: newUrl },
+          '',
+          newUrl
+        )
+      }
+    },
+    [navProjectId]
+  )
 
   // Restore this type's in-memory session before paint so tab switches don't
   // flash default content. useState also hydrates from the same store on
@@ -1600,9 +1775,23 @@ export default function Home({
       const { ciphertext, iv } = await encryptContent(initialContent, key)
       encryptedPayloadRef.current = { ciphertext, iv }
 
+      let token: string | null = null
+      try {
+        token = await getToken()
+      } catch {
+        // anonymous create still works; project attach needs auth
+      }
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      }
+      if (token) headers.Authorization = `Bearer ${token}`
+      const contentKeyWrapped = token
+        ? await buildOwnerKeyWrapped(key, getToken)
+        : null
+
       const res = await fetch('/api/share', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           schemaVersion: 2,
           ciphertext,
@@ -1611,6 +1800,7 @@ export default function Home({
           type: targetType,
           accessType: 'editor',
           isPrivate: false,
+          ...(contentKeyWrapped ? { contentKeyWrapped } : {}),
         }),
       })
       const data = await res.json()
@@ -1622,6 +1812,7 @@ export default function Home({
         setDocumentType(data.type || targetType)
         addOwnership(data.slug)
         lastPersistedContentRef.current = initialContent
+        await attachPendingProject(data.slug)
 
         const resolvedType = (data.type || targetType) as ShareType
         const newUrl = buildDocumentUrl({
@@ -1629,6 +1820,7 @@ export default function Home({
           slug: data.slug,
           viewMode: 'formatter',
           keyString,
+          projectId: navProjectId(),
         })
 
         window.history.pushState(
@@ -1689,8 +1881,11 @@ export default function Home({
       encryptedPayloadRef.current = { ciphertext, iv }
 
       let ownerKeyWrapped: string | null = null
+      let contentKeyWrapped: string | null = null
       if (isDocumentPrivate) {
         ownerKeyWrapped = await buildOwnerKeyWrapped(key, getToken)
+      } else {
+        contentKeyWrapped = await buildOwnerKeyWrapped(key, getToken)
       }
 
       let token: string | null = null
@@ -1717,6 +1912,7 @@ export default function Home({
           accessType: userAccessLevel,
           type: documentType,
           ...(ownerKeyWrapped ? { ownerKeyWrapped } : {}),
+          ...(contentKeyWrapped ? { contentKeyWrapped } : {}),
         }),
       })
 
@@ -1743,6 +1939,7 @@ export default function Home({
               slug: documentSlug,
               viewMode: currentViewMode,
               keyString: currentKey,
+              projectId: navProjectId(),
             })
 
             window.history.replaceState(
@@ -1928,6 +2125,7 @@ export default function Home({
         slug: data.slug,
         viewMode: 'formatter',
         keyString,
+        projectId: navProjectId(),
       })
 
       window.history.pushState(
@@ -2031,8 +2229,11 @@ export default function Home({
         encryptedPayloadRef.current = { ciphertext, iv }
 
         let ownerKeyWrapped: string | null = null
+        let contentKeyWrapped: string | null = null
         if (settings.isPrivateLink) {
           ownerKeyWrapped = await buildOwnerKeyWrapped(key, getToken)
+        } else {
+          contentKeyWrapped = await buildOwnerKeyWrapped(key, getToken)
         }
 
         const res = await fetch(url, {
@@ -2045,13 +2246,14 @@ export default function Home({
             salt: settings.isPrivateLink ? salt : undefined,
             mode: currentViewMode,
             isPrivate: settings.isPrivateLink,
-            accessType: settings.accessLevel,
+            accessType: 'viewer',
             previewOnly:
               documentType === 'markdown'
                 ? settings.previewOnly === true
                 : false,
             type: documentType,
             ...(ownerKeyWrapped ? { ownerKeyWrapped } : {}),
+            ...(contentKeyWrapped ? { contentKeyWrapped } : {}),
           }),
         })
 
@@ -2068,12 +2270,23 @@ export default function Home({
           setDocumentSlug(newSlug)
           addOwnership(newSlug)
 
+          const pendingTitle = takePendingDocumentTitle()
+          if (pendingTitle && !documentSlug) {
+            try {
+              await renameFile(getToken, newSlug, pendingTitle)
+              await updateLocalDocumentTitle(newSlug, pendingTitle)
+            } catch (err) {
+              console.warn('Could not apply draft title', err)
+            }
+          }
+
           const newUrl = buildDocumentUrl({
             type: documentType,
             slug: newSlug,
             viewMode: currentViewMode,
             keyString: keyString || activeKeyStringRef.current || '',
             isPrivate: settings.isPrivateLink,
+            projectId: navProjectId(),
           })
 
           window.history.pushState(
@@ -2083,7 +2296,7 @@ export default function Home({
           )
         }
 
-        setUserAccessLevel(settings.accessLevel)
+        setUserAccessLevel('viewer')
         setIsDocumentPrivate(settings.isPrivateLink)
         setIsPreviewOnly(
           documentType === 'markdown' ? settings.previewOnly === true : false
@@ -2491,9 +2704,23 @@ export default function Home({
           )
           encryptedPayloadRef.current = { ciphertext, iv }
 
+          let token: string | null = null
+          try {
+            token = await getToken()
+          } catch {
+            // anonymous create still works; project attach needs auth
+          }
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+          }
+          if (token) headers.Authorization = `Bearer ${token}`
+          const contentKeyWrapped = token
+            ? await buildOwnerKeyWrapped(key, getToken)
+            : null
+
           const res = await fetch('/api/share', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({
               ciphertext,
               iv,
@@ -2501,6 +2728,7 @@ export default function Home({
               type: targetType,
               accessType: 'editor',
               isPrivate: false,
+              ...(contentKeyWrapped ? { contentKeyWrapped } : {}),
             }),
           })
           const data = await res.json()
@@ -2512,6 +2740,17 @@ export default function Home({
             setDocumentType(data.type || targetType)
             addOwnership(data.slug)
             lastPersistedContentRef.current = debouncedContentForAutoSave
+            await attachPendingProject(data.slug)
+
+            const pendingTitle = takePendingDocumentTitle()
+            if (pendingTitle) {
+              try {
+                if (token) await renameFile(getToken, data.slug, pendingTitle)
+                await updateLocalDocumentTitle(data.slug, pendingTitle)
+              } catch (err) {
+                console.warn('Could not apply draft title', err)
+              }
+            }
 
             const resolvedType = (data.type || targetType) as ShareType
             const newUrl = buildDocumentUrl({
@@ -2519,6 +2758,7 @@ export default function Home({
               slug: data.slug,
               viewMode: currentViewMode,
               keyString,
+              projectId: navProjectId(),
             })
 
             justAutoSavedSlugRef.current = data.slug
@@ -2553,6 +2793,108 @@ export default function Home({
     isJsonValid,
     currentViewMode,
     getOrCreateDocumentKey,
+    getToken,
+    attachPendingProject,
+  ])
+
+  // "New file in project": create + attach as soon as auth is ready (don't wait for typing).
+  const projectBootstrapRef = React.useRef(false)
+  useEffect(() => {
+    if (projectBootstrapRef.current) return
+    if (!pendingProjectIdRef.current) return
+    if (documentSlug || urlSlug) return
+    if (!isAuthLoaded || !isSignedIn) return
+    if (isAutoCreatingRef.current) return
+    if (documentType === 'json' && !isJsonValid) return
+
+    projectBootstrapRef.current = true
+    isAutoCreatingRef.current = true
+    const targetType = documentType
+    const content = currentJsonContent
+
+    ;(async () => {
+      try {
+        const { key, keyString } = await getOrCreateDocumentKey()
+        const { ciphertext, iv } = await encryptContent(content, key)
+        encryptedPayloadRef.current = { ciphertext, iv }
+
+        const token = await getToken()
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        }
+        if (token) headers.Authorization = `Bearer ${token}`
+        const contentKeyWrapped = token
+          ? await buildOwnerKeyWrapped(key, getToken)
+          : null
+
+        const res = await fetch('/api/share', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            ciphertext,
+            iv,
+            mode: currentViewMode,
+            type: targetType,
+            accessType: 'editor',
+            isPrivate: false,
+            ...(contentKeyWrapped ? { contentKeyWrapped } : {}),
+          }),
+        })
+        const data = await res.json()
+        if (data.slug) {
+          setDocumentSlug(data.slug)
+          setUserAccessLevel(data.accessType || 'editor')
+          setHasEditPermission(true)
+          setIsCurrentUserOwner(true)
+          setDocumentType(data.type || targetType)
+          addOwnership(data.slug)
+          lastPersistedContentRef.current = content
+          await attachPendingProject(data.slug)
+
+          const pendingTitle = takePendingDocumentTitle()
+          if (pendingTitle) {
+            try {
+              await renameFile(getToken, data.slug, pendingTitle)
+              await updateLocalDocumentTitle(data.slug, pendingTitle)
+            } catch (err) {
+              console.warn('Could not apply draft title', err)
+            }
+          }
+
+          const resolvedType = (data.type || targetType) as ShareType
+          const newUrl = buildDocumentUrl({
+            type: resolvedType,
+            slug: data.slug,
+            viewMode: currentViewMode,
+            keyString,
+            projectId: navProjectId(),
+          })
+          justAutoSavedSlugRef.current = data.slug
+          window.history.replaceState(
+            { ...window.history.state, as: newUrl, url: newUrl },
+            '',
+            newUrl
+          )
+        }
+      } catch (e) {
+        console.error('Failed to bootstrap project file', e)
+        projectBootstrapRef.current = false
+      } finally {
+        isAutoCreatingRef.current = false
+      }
+    })()
+  }, [
+    documentSlug,
+    urlSlug,
+    isAuthLoaded,
+    isSignedIn,
+    documentType,
+    isJsonValid,
+    currentJsonContent,
+    currentViewMode,
+    getOrCreateDocumentKey,
+    getToken,
+    attachPendingProject,
   ])
 
   const handleCopy = () => {
@@ -2605,10 +2947,49 @@ export default function Home({
     [formattedOutput]
   )
 
+  useEffect(() => {
+    remoteProjectIdRef.current = remoteProject?.id ?? null
+  }, [remoteProject?.id])
+
+  // Prefer `/workspace/…` in the address bar for signed-in library files.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!documentSlug || !isSignedIn) return
+    const path = window.location.pathname
+    if (path.startsWith('/workspace/')) return
+    if (!path.startsWith('/editor')) return
+    // Wait for meta when we expect a project; standalone can rewrite immediately.
+    if (remoteFile?.projectId && !remoteProject?.id) return
+    const keyString =
+      activeKeyStringRef.current || extractKeyFromFragment() || ''
+    const next = buildDocumentUrl({
+      type: documentType,
+      slug: documentSlug,
+      viewMode: currentViewMode,
+      keyString: isDocumentPrivate ? undefined : keyString,
+      isPrivate: isDocumentPrivate,
+      projectId: remoteProject?.id ?? remoteFile?.projectId ?? null,
+      purpose: 'app',
+    })
+    window.history.replaceState(
+      { ...window.history.state, as: next, url: next },
+      '',
+      next
+    )
+  }, [
+    remoteProject?.id,
+    remoteFile?.projectId,
+    documentSlug,
+    documentType,
+    currentViewMode,
+    isDocumentPrivate,
+    isSignedIn,
+  ])
+
   // Mobile specific view state
   const [mobileTab, setMobileTab] = useState<'editor' | 'viewer'>('editor')
 
-  return (
+  const editorShell = (
     <div
       className={cn(
         'flex h-dvh w-screen bg-gray-50 text-zinc-800 font-sans overflow-hidden',
@@ -3059,22 +3440,49 @@ export default function Home({
                           <option value='minify'>Minify</option>
                         </select>
                       </div>
-                      <button
-                        onClick={handleCopy}
-                        className='p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors group relative'
-                      >
-                        {isClipboardCopied ? (
-                          <Check size={14} className='text-emerald-500' />
-                        ) : (
-                          <Copy
-                            size={14}
-                            className='text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-200'
-                          />
-                        )}
-                        <span className='absolute right-full mr-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-zinc-800 text-zinc-300 text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity'>
-                          Copy Output
-                        </span>
-                      </button>
+                      <div className='flex items-center gap-0.5'>
+                        <button
+                          type='button'
+                          onClick={() =>
+                            writeWordWrapPreference(!wordWrapEnabled)
+                          }
+                          aria-pressed={wordWrapEnabled}
+                          title={
+                            wordWrapEnabled
+                              ? 'Disable line wrap'
+                              : 'Enable line wrap'
+                          }
+                          aria-label={
+                            wordWrapEnabled
+                              ? 'Disable line wrap'
+                              : 'Enable line wrap'
+                          }
+                          className={cn(
+                            'inline-flex items-center justify-center h-7 w-7 rounded-md transition-colors cursor-pointer',
+                            wordWrapEnabled
+                              ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400'
+                              : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/70 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-200'
+                          )}
+                        >
+                          <WrapText size={14} />
+                        </button>
+                        <button
+                          onClick={handleCopy}
+                          className='p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors group relative cursor-pointer'
+                        >
+                          {isClipboardCopied ? (
+                            <Check size={14} className='text-emerald-500' />
+                          ) : (
+                            <Copy
+                              size={14}
+                              className='text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-200'
+                            />
+                          )}
+                          <span className='absolute right-full mr-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-zinc-800 text-zinc-300 text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity'>
+                            Copy Output
+                          </span>
+                        </button>
+                      </div>
                     </div>
                     <div className='flex-1 ml-16'>
                       <JsonEditor
@@ -3082,6 +3490,7 @@ export default function Home({
                         remoteValue={formatterRemoteValue}
                         onChange={() => {}}
                         readOnly={true}
+                        showWrapToggle={false}
                         className='rounded-none border-0 shadow-none'
                       />
                     </div>
@@ -3278,7 +3687,7 @@ export default function Home({
         </div>
       )}
 
-      <LocalHistoryModal
+      <HistoryModal
         isOpen={isHistoryModalOpen}
         onClose={() => setIsHistoryModalOpen(false)}
         documents={localDocuments}
@@ -3299,15 +3708,17 @@ export default function Home({
         defaultPassword={documentPassword}
         defaultPreviewOnly={isPreviewOnly}
         documentType={documentType}
-        documentTitle={deriveDocumentTitle(
-          currentJsonContent,
-          documentType === 'text' ||
+        documentTitle={
+          remoteFile?.title?.trim() ||
+          DEFAULT_DOCUMENT_TITLE[
+            documentType === 'text' ||
             documentType === 'markdown' ||
             documentType === 'html' ||
             documentType === 'json'
-            ? documentType
-            : 'json'
-        )}
+              ? documentType
+              : 'json'
+          ]
+        }
         hasPermissionToConfigure={isCurrentUserOwner}
         isPrivacyLocked={isPrivacyLocked}
         onSaveShareSettings={handleShareDocument}
@@ -3322,12 +3733,22 @@ export default function Home({
                 keyString:
                   activeKeyStringRef.current || extractKeyFromFragment() || '',
                 isPrivate: isDocumentPrivate,
+                purpose: 'share',
                 origin: window.location.origin,
               })
             : ''
         }
+        projectId={remoteProject?.id ?? null}
         forceLightMode={false}
       />
     </div>
+  )
+
+  // Wrapped whenever the flag is on (constant) so the tree shape never changes
+  // when auth resolves; the provider itself is inert while signed out.
+  return isProjectsEnabled ? (
+    <InviteProvider>{editorShell}</InviteProvider>
+  ) : (
+    editorShell
   )
 }

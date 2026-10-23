@@ -14,7 +14,9 @@ import {
   File,
   FileText,
   Code2,
+  FolderOpen,
 } from 'lucide-react'
+import { useHomeHref } from '@/hooks/use-home-href'
 
 type NavLink = {
   href: string
@@ -42,6 +44,7 @@ export default function Navbar() {
   // Avoid SSR/client markup drift for the mobile drawer (and stale HMR class mismatches)
   const [mounted, setMounted] = useState(false)
   const sidebarRef = useRef<HTMLDivElement>(null)
+  const homeHref = useHomeHref()
 
   useEffect(() => {
     setMounted(true)
@@ -111,7 +114,11 @@ export default function Navbar() {
       <div className='absolute inset-0 -z-10 border-b border-black/[0.06] bg-white/80 backdrop-blur-[10px]' />
 
       <div className='container mx-auto px-4 lg:px-8 h-16 flex items-center justify-between relative z-10'>
-        <Link href='/' className='flex items-center gap-2 relative z-50'>
+        <Link
+          href={homeHref}
+          className='flex items-center gap-2 relative z-50'
+          aria-label='JsonRock home'
+        >
           <Image
             src='/jsonrock-dark.svg'
             alt='JSONROCK'
@@ -135,7 +142,14 @@ export default function Navbar() {
           ))}
         </nav>
 
-        <div className='hidden md:flex items-center gap-4'>
+        <div className='hidden md:flex items-center gap-3'>
+          <Link
+            href='/workspace'
+            className='inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-zinc-800 border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:border-zinc-300 transition-colors'
+          >
+            <FolderOpen size={16} className='shrink-0 opacity-80' />
+            Workspace
+          </Link>
           <Link
             href='/editor?view=formatter'
             className='px-5 py-2.5 bg-[#00B3B7] hover:bg-[#009ea1] text-white text-sm font-semibold rounded-lg transition-all hover:shadow-lg'
@@ -238,18 +252,12 @@ export default function Navbar() {
                     )
                   })}
                   <Link
-                    href='/account/mcp'
+                    href='/workspace'
                     onClick={() => setIsOpen(false)}
                     className='flex items-center gap-3 px-5 py-3 text-zinc-700 hover:bg-[#00B3B7]/8 hover:text-[#00B3B7] transition-colors border-b border-zinc-100 cursor-pointer'
                   >
-                    <Image
-                      src='/mcp.png'
-                      alt=''
-                      width={18}
-                      height={18}
-                      className='h-[18px] w-[18px] shrink-0 invert dark:invert-0'
-                    />
-                    <span className='font-medium text-[15px]'>MCP tokens</span>
+                    <FolderOpen size={18} className='shrink-0 opacity-80' />
+                    <span className='font-medium text-[15px]'>Workspace</span>
                   </Link>
                 </nav>
               </section>

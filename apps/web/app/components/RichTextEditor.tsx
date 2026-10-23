@@ -1353,6 +1353,13 @@ const RichTextEditor = ({
     }
   }, [remoteContent, editor])
 
+  // TipTap only reads `editable` at create — sync when permission flips after mount.
+  React.useEffect(() => {
+    if (!editor || editor.isDestroyed) return
+    const next = !readOnly
+    if (editor.isEditable !== next) editor.setEditable(next)
+  }, [editor, readOnly])
+
   // Cleanup
   React.useEffect(() => {
     return () => {

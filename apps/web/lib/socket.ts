@@ -19,3 +19,57 @@ export const getSocket = (): Socket => {
   }
   return socket
 }
+
+/** Event used to join an authenticated, server-verified room (e.g. `user:{clerkUserId}`). */
+export const AUTH_JOIN_EVENT = 'auth/join'
+
+export const userRoom = (clerkUserId: string) => `user:${clerkUserId}`
+
+/**
+ * Connect (if needed) with a Clerk token and join the signed-in user's private
+ * room so the server can push `project-invite` events. Shares the same socket as
+ * slug rooms; it never leaves/rejoins them. Returns a cleanup function.
+ */
+export function joinUserRoom(
+  getToken: () => Promise<string | null>,
+  clerkUserId: string
+): () => void {
+  const socket = getSocket()
+  const room = userRoom(clerkUserId)
+  let cancelled = false
+
+  const join = async () => {
+    const token = await getToken()
+    if (cancelled || !token) return
+    // Used by the next handshake; also sent with the join for already-open sockets.
+    socket.auth = { token }
+    socket.emit(AUTH_JOIN_EVENT, room, { token })
+  }
+
+  const onConnect = () => {
+    void join()
+  }
+  // Refresh the (short-lived) token before every automatic reconnect attempt.
+  const onReconnectAttempt = () => {
+    void getToken().then((token) => {
+      if (!cancelled && token) socket.auth = { token }
+    })
+  }
+
+  socket.on('connect', onConnect)
+  socket.io.on('reconnect_attempt', onReconnectAttempt)
+
+  void getToken().then((token) => {
+    if (cancelled || !token) return
+    socket.auth = { token }
+    if (socket.connected) void join()
+    else socket.connect()
+  })
+
+  return () => {
+    cancelled = true
+    socket.off('connect', onConnect)
+    socket.io.off('reconnect_attempt', onReconnectAttempt)
+    if (socket.connected) socket.emit('leave-room', room)
+  }
+}

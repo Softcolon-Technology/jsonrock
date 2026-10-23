@@ -13,6 +13,21 @@ export type FeatureAnnouncement = {
 
 export const FEATURE_ANNOUNCEMENTS: FeatureAnnouncement[] = [
   {
+    id: 'workspace-projects-2026-10',
+    eyebrow: 'New feature',
+    title: 'Your files, organized in Workspace.',
+    message:
+      'Sign in to open Workspace: group encrypted files into projects, invite teammates, label docs, and share view-only links — without losing end-to-end encryption.',
+    highlights: [
+      'Projects & invites',
+      'Labels & library',
+      'View-only share links',
+    ],
+    ctaLabel: 'Open Workspace',
+    ctaHref: '/workspace',
+    active: true,
+  },
+  {
     id: 'mcp-integration-2026-09',
     eyebrow: 'New feature',
     title: 'Give your AI agents a way to publish.',
@@ -22,7 +37,7 @@ export const FEATURE_ANNOUNCEMENTS: FeatureAnnouncement[] = [
     imageSrc: '/mcp.png',
     imageAlt: 'MCP',
     ctaLabel: 'Set up MCP tokens',
-    ctaHref: '/account/mcp',
+    ctaHref: '/mcp',
     active: true,
   },
 ]

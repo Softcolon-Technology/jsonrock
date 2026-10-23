@@ -94,7 +94,7 @@ Base path: `/api` (e.g. `http://localhost:3005/api`).
 
 Agents such as Claude, Cursor, and ChatGPT can publish a document and receive one shareable link.
 
-1. Sign in on the site and open `/account/mcp`.
+1. Sign in on the site and open `/workspace/mcp`.
 2. Create a token. The secret (`jr_mcp_…`) is shown once.
 3. Point the agent at `http://localhost:3005/mcp` (or your deployed API origin + `/mcp`) with `Authorization: Bearer <token>`.
 

@@ -22,9 +22,7 @@ export interface WelcomeEmailPayload {
 /**
  * Resolve a human-readable display name for the authenticated Clerk user.
  */
-export async function resolveClerkSenderName(
-  userId: string
-): Promise<string> {
+export async function resolveClerkSenderName(userId: string): Promise<string> {
   const secretKey = process.env.CLERK_SECRET_KEY
   if (!secretKey) {
     return 'Someone'
@@ -121,6 +119,95 @@ export async function sendShareLinkEmail(
     senderName,
   })
 
+  return { id: data.id }
+}
+
+export interface ProjectInviteEmailPayload {
+  recipientEmail: string
+  projectName: string
+  inviterName: string
+  role: 'editor' | 'viewer'
+  acceptUrl: string
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
+ * Sends a project invitation email via Resend (inline HTML, no template).
+ * Returns null (and logs a warning) when RESEND_API_KEY is not configured so
+ * invite creation never fails because of email delivery.
+ */
+export async function sendProjectInviteEmail(
+  payload: ProjectInviteEmailPayload
+): Promise<{ id: string } | null> {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) {
+    logger.warn(
+      '[project-invite-email] RESEND_API_KEY is not configured; skipping email',
+      { to: payload.recipientEmail }
+    )
+    return null
+  }
+
+  const from =
+    process.env.RESEND_FROM_EMAIL || 'JsonRock <noreply@jsonrock.com>'
+  const inviter = escapeHtml(payload.inviterName)
+  const project = escapeHtml(payload.projectName)
+  const roleLabel = payload.role === 'editor' ? 'edit' : 'view'
+  const url = escapeHtml(payload.acceptUrl)
+
+  const html = `<!doctype html>
+<html>
+  <body style="margin:0;padding:24px;background:#f6f6f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#18181b;">
+    <div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px;">
+      <h1 style="font-size:20px;margin:0 0 16px;">You're invited to a project</h1>
+      <p style="font-size:15px;line-height:1.5;margin:0 0 24px;">
+        <strong>${inviter}</strong> invited you to <strong>${project}</strong> on JsonRock
+        with permission to <strong>${roleLabel}</strong> its files.
+      </p>
+      <p style="margin:0 0 24px;">
+        <a href="${url}" style="display:inline-block;background:#18181b;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-size:15px;">View invitation</a>
+      </p>
+      <p style="font-size:13px;color:#71717a;line-height:1.5;margin:0;">
+        Sign in with this email address to accept. The invitation expires in 14 days.<br />
+        If the button doesn't work, paste this link into your browser:<br />
+        <span style="word-break:break-all;">${url}</span>
+      </p>
+    </div>
+  </body>
+</html>`
+
+  const text = `${payload.inviterName} invited you to "${payload.projectName}" on JsonRock (you can ${roleLabel} its files).\n\nAccept the invitation: ${payload.acceptUrl}\n\nSign in with this email address to accept. The invitation expires in 14 days.`
+
+  const resend = new Resend(apiKey)
+  const { data, error } = await resend.emails.send({
+    from,
+    to: payload.recipientEmail,
+    subject: `${payload.inviterName} invited you to "${payload.projectName}" on JsonRock`,
+    html,
+    text,
+  })
+
+  if (error) {
+    logger.error('[project-invite-email] Resend send error', error)
+    throw new Error(error.message || 'Failed to send invite email')
+  }
+
+  if (!data?.id) {
+    throw new Error('Resend did not return an email id')
+  }
+
+  logger.info('[project-invite-email] Sent project invite', {
+    id: data.id,
+    to: payload.recipientEmail,
+  })
   return { id: data.id }
 }
 

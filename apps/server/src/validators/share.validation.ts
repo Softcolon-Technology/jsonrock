@@ -39,6 +39,7 @@ export const createShareSchema = {
     iv: Joi.string().allow('').optional(),
     salt: Joi.string().allow('', null).optional(),
     ownerKeyWrapped: Joi.string().allow('', null).optional(),
+    contentKeyWrapped: Joi.string().allow('', null).optional(),
     mode: modeSchema,
     isPrivate: Joi.boolean().default(false),
     accessType: accessTypeSchema,
@@ -79,11 +80,36 @@ export const updateShareSchema = {
     iv: Joi.string().allow('').optional(),
     salt: Joi.string().allow('', null).optional(),
     ownerKeyWrapped: Joi.string().allow('', null).optional(),
+    contentKeyWrapped: Joi.string().allow('', null).optional(),
     mode: modeSchema,
     isPrivate: Joi.boolean().default(false),
     accessType: accessTypeSchema,
     previewOnly: Joi.boolean().optional(),
     type: typeSchema,
+  }),
+}
+
+// Validation schema for PATCH /api/share/:slug (title / move between projects)
+export const patchShareMetaSchema = {
+  params: Joi.object({
+    slug: slugSchema,
+  }),
+  body: Joi.object({
+    title: Joi.string().trim().max(60).allow('').optional().messages({
+      'string.max': 'Title must not exceed 60 characters',
+    }),
+    projectId: Joi.string().hex().length(24).allow(null).optional(),
+  })
+    .or('title', 'projectId')
+    .messages({
+      'object.missing': 'Provide a title and/or projectId',
+    }),
+}
+
+// Validation schema for DELETE /api/share/:slug
+export const deleteShareSchema = {
+  params: Joi.object({
+    slug: slugSchema,
   }),
 }
 

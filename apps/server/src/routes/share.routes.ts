@@ -12,10 +12,14 @@ import {
   getRawShareSchema,
   shareEmailSchema,
   ownerUnlockSchema,
+  patchShareMetaSchema,
+  deleteShareSchema,
 } from '../validators/share.validation'
+import { FilesController } from '../controllers/files.controller'
 
 const router: Router = Router()
 const shareController = new ShareController()
+const filesController = new FilesController()
 
 // Apply optional Clerk auth verification to all routes
 router.use(optionalAuth)
@@ -86,6 +90,14 @@ router.get(
 )
 
 router.get(
+  '/share/:slug/content-key',
+  readLimiter,
+  requireAuth,
+  validate(ownerUnlockSchema),
+  shareController.getContentKey
+)
+
+router.get(
   '/share/:slug',
   readLimiter,
   validate(getShareMetaSchema),
@@ -102,6 +114,24 @@ router.put(
   writeLimiter,
   validate(updateShareSchema),
   shareController.updateShare
+)
+
+// PATCH /api/share/:slug — title / move in or out of a project (owner | project editor+)
+router.patch(
+  '/share/:slug',
+  writeLimiter,
+  requireAuth,
+  validate(patchShareMetaSchema),
+  filesController.patchShare
+)
+
+// DELETE /api/share/:slug — hard-delete (owner | project editor+)
+router.delete(
+  '/share/:slug',
+  writeLimiter,
+  requireAuth,
+  validate(deleteShareSchema),
+  filesController.deleteShare
 )
 
 // /api/upload

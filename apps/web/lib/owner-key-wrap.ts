@@ -55,9 +55,12 @@ export async function tryOwnerUnwrapContentKey(
   const headers = await authHeaders(getToken)
   if (!headers) return null
 
-  const res = await fetch(`/api/share/${encodeURIComponent(slug)}/owner-unlock`, {
-    headers,
-  })
+  const res = await fetch(
+    `/api/share/${encodeURIComponent(slug)}/owner-unlock`,
+    {
+      headers,
+    }
+  )
   if (!res.ok) return null
 
   const data = (await res.json()) as {
@@ -68,4 +71,27 @@ export async function tryOwnerUnwrapContentKey(
 
   const wrappingKey = await deriveWrappingKeyFromUserSecret(data.keyWrapSecret)
   return unwrapContentKey(data.ownerKeyWrapped, wrappingKey)
+}
+
+/**
+ * Recover a public document's `#key=` for the signed-in owner or a project
+ * member. Returns null when auth/wrap is unavailable.
+ */
+export async function tryRecoverContentKeyString(
+  slug: string,
+  getToken: () => Promise<string | null>
+): Promise<string | null> {
+  const headers = await authHeaders(getToken)
+  if (!headers) return null
+
+  const res = await fetch(
+    `/api/share/${encodeURIComponent(slug)}/content-key`,
+    { headers }
+  )
+  if (!res.ok) return null
+
+  const data = (await res.json()) as { keyString?: string }
+  return typeof data.keyString === 'string' && data.keyString
+    ? data.keyString
+    : null
 }

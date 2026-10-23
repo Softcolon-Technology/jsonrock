@@ -25,26 +25,11 @@ interface JsonEditorProps {
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
 import { UploadCloud, Download, WrapText, PanelLeft } from 'lucide-react'
-
-const WORD_WRAP_STORAGE_KEY = 'jsonrock_editor_word_wrap'
-const WORD_WRAP_CHANGE_EVENT = 'jsonrock-word-wrap-change'
-
-function readWordWrapPreference(): boolean {
-  try {
-    return localStorage.getItem(WORD_WRAP_STORAGE_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-
-function writeWordWrapPreference(enabled: boolean) {
-  try {
-    localStorage.setItem(WORD_WRAP_STORAGE_KEY, enabled ? '1' : '0')
-  } catch {
-    // Ignore quota / private-mode failures — preference just won't persist.
-  }
-  window.dispatchEvent(new Event(WORD_WRAP_CHANGE_EVENT))
-}
+import {
+  readWordWrapPreference,
+  writeWordWrapPreference,
+  WORD_WRAP_CHANGE_EVENT,
+} from '@/lib/editor-word-wrap'
 
 /** Monaco throws if touched after dispose — never let that crash the app. */
 function withLiveEditor(
@@ -121,7 +106,8 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
   const monacoRef = React.useRef<typeof import('monaco-editor') | null>(null)
   const isRemoteUpdate = React.useRef(false) // Flag to prevent loop
   const mountedRef = React.useRef(true)
-  const canShowWrapToggle = showWrapToggle ?? !readOnly
+  // Wrap is useful on both editable input and read-only formatter panes
+  const canShowWrapToggle = showWrapToggle ?? true
   const showToolbar = showSidebarToggle || canShowWrapToggle || !readOnly
 
   const toolbarBtnClass = (opts?: { active?: boolean; disabled?: boolean }) =>
@@ -278,34 +264,38 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
     onChange(value)
   }
 
-  const editorOptions = React.useMemo<editor.IStandaloneEditorConstructionOptions>(
-    () => ({
-      minimap: { enabled: false },
-      fontSize: 13,
-      lineNumbers: 'on',
-      scrollBeyondLastLine: false,
-      automaticLayout: true,
-      readOnly,
-      fontFamily: 'Geist Mono, monospace',
-      padding: { top: 16, bottom: 16 },
-      scrollbar: {
-        vertical: 'visible',
-        horizontal: 'auto',
-        useShadows: false,
-        verticalScrollbarSize: 10,
-        horizontalScrollbarSize: 10,
-        verticalHasArrows: false,
-        horizontalHasArrows: false,
-      },
-      hover: {
-        enabled: false,
-      },
-      ...customOptions,
-      // Preference wins over any caller override so both panes stay in sync
-      wordWrap: wordWrapEnabled ? 'on' : 'off',
-    }),
-    [readOnly, customOptions, wordWrapEnabled]
-  )
+  const editorOptions =
+    React.useMemo<editor.IStandaloneEditorConstructionOptions>(
+      () => ({
+        minimap: { enabled: false },
+        fontSize: 13,
+        lineNumbers: 'on',
+        scrollBeyondLastLine: false,
+        automaticLayout: true,
+        readOnly,
+        selectOnLineNumbers: true,
+        fontFamily: 'Geist Mono, monospace',
+        padding: { top: 16, bottom: 16 },
+        scrollbar: {
+          vertical: 'visible',
+          horizontal: 'auto',
+          useShadows: false,
+          verticalScrollbarSize: 10,
+          horizontalScrollbarSize: 10,
+          verticalHasArrows: false,
+          horizontalHasArrows: false,
+        },
+        hover: {
+          enabled: false,
+        },
+        ...customOptions,
+        // Preference wins over any caller override so both panes stay in sync
+        wordWrap: wordWrapEnabled ? 'on' : 'off',
+        // Keep native textarea selectable; Monaco still blocks edits via readOnly
+        domReadOnly: false,
+      }),
+      [readOnly, customOptions, wordWrapEnabled]
+    )
 
   return (
     <div

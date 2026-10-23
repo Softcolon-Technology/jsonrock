@@ -1,22 +1,27 @@
 'use client'
 
-import { memo, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 const mermaidCache = new Map<string, string>()
 const mermaidPrefixCache = new Map<string, string>()
 
-/** Bump when layout/theme density changes so in-memory cache doesn't keep old large SVGs. */
-const MERMAID_LAYOUT_VERSION = 'compact-v2'
+/** Bump when layout/theme density changes so in-memory cache doesn't keep old SVGs. */
+const MERMAID_LAYOUT_VERSION = 'fit-v1'
 
 const MAX_CACHE_ENTRIES = 40
+const MIN_SCALE = 0.35
+const MAX_SCALE = 5
+const ZOOM_STEP = 0.12
+/** Default = fit entire diagram (all nodes visible). Zoom in with ⌘/Ctrl+scroll. */
+const DEFAULT_SCALE = 1
 
 const getIsDarkMode = () =>
   typeof document !== 'undefined' &&
   document.documentElement.classList.contains('dark')
 
-const compactThemeVariables = {
-  fontSize: '11px',
+const diagramThemeVariables = {
+  fontSize: '14px',
   fontFamily:
     'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
 }
@@ -28,24 +33,25 @@ const getMermaidConfig = (isDark: boolean) => ({
   flowchart: {
     htmlLabels: true,
     curve: 'basis' as const,
-    padding: 6,
-    nodeSpacing: 20,
-    rankSpacing: 24,
-    wrappingWidth: 160,
+    padding: 12,
+    nodeSpacing: 36,
+    rankSpacing: 44,
+    wrappingWidth: 200,
+    // Scale SVG to container width so every node stays on-screen by default.
     useMaxWidth: true,
   },
   sequence: {
-    actorMargin: 28,
-    boxMargin: 4,
-    boxTextMargin: 3,
-    noteMargin: 5,
-    messageMargin: 22,
+    actorMargin: 40,
+    boxMargin: 8,
+    boxTextMargin: 5,
+    noteMargin: 8,
+    messageMargin: 32,
     mirrorActors: false,
     useMaxWidth: true,
   },
   themeVariables: isDark
     ? {
-        ...compactThemeVariables,
+        ...diagramThemeVariables,
         background: '#18181b',
         primaryColor: '#27272a',
         primaryTextColor: '#fafafa',
@@ -81,14 +87,14 @@ const getMermaidConfig = (isDark: boolean) => ({
         sequenceNumberColor: '#18181b',
       }
     : {
-        ...compactThemeVariables,
+        ...diagramThemeVariables,
       },
 })
 
 type MermaidApi = typeof import('mermaid').default
 
 let mermaidModulePromise: Promise<MermaidApi> | null = null
-let initializedTheme: 'dark' | 'light' | null = null
+let initializedKey: string | null = null
 let renderSeq = 0
 /** Serialize renders — concurrent mermaid.render calls fight over the DOM. */
 let renderChain: Promise<unknown> = Promise.resolve()
@@ -107,10 +113,10 @@ export function preloadMermaid(): void {
 
 async function getMermaid(isDark: boolean): Promise<MermaidApi> {
   const mermaid = await loadMermaid()
-  const theme = isDark ? 'dark' : 'light'
-  if (initializedTheme !== theme) {
+  const key = `${MERMAID_LAYOUT_VERSION}:${isDark ? 'dark' : 'light'}`
+  if (initializedKey !== key) {
     mermaid.initialize(getMermaidConfig(isDark))
-    initializedTheme = theme
+    initializedKey = key
   }
   return mermaid
 }
@@ -142,11 +148,22 @@ function enqueueRender<T>(task: () => Promise<T>): Promise<T> {
   return run
 }
 
+/** ⌘ on Apple, Ctrl elsewhere — used for zoom / pan gestures. */
+function isZoomModifier(e: { metaKey: boolean; ctrlKey: boolean }): boolean {
+  return e.metaKey || e.ctrlKey
+}
+
+function clampScale(n: number) {
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, n))
+}
+
 type MermaidDiagramProps = {
   chart: string
 }
 
-/** Renders a Mermaid chart to SVG, with theme-aware caching. */
+type ViewTransform = { scale: number; x: number; y: number }
+
+/** Renders a Mermaid chart to SVG, with theme-aware caching and ⌘/Ctrl zoom+pan. */
 export const MermaidDiagram = memo(function MermaidDiagram({
   chart,
 }: MermaidDiagramProps) {
@@ -163,6 +180,29 @@ export const MermaidDiagram = memo(function MermaidDiagram({
   const [isRendering, setIsRendering] = useState(
     () => !mermaidCache.has(cacheKey)
   )
+  const [transform, setTransform] = useState<ViewTransform>({
+    scale: DEFAULT_SCALE,
+    x: 0,
+    y: 0,
+  })
+  const [isPanning, setIsPanning] = useState(false)
+  const [modifierHeld, setModifierHeld] = useState(false)
+
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const panRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    originX: number
+    originY: number
+  } | null>(null)
+  const transformRef = useRef(transform)
+  transformRef.current = transform
+
+  // Reset view when the chart body changes meaningfully
+  useEffect(() => {
+    setTransform({ scale: DEFAULT_SCALE, x: 0, y: 0 })
+  }, [trimmed])
 
   // Keep theme in sync when the app toggles dark/light mode
   useEffect(() => {
@@ -179,6 +219,25 @@ export const MermaidDiagram = memo(function MermaidDiagram({
   // Warm the mermaid chunk as soon as a diagram mounts
   useEffect(() => {
     void loadMermaid()
+  }, [])
+
+  // Track ⌘/Ctrl so the cursor can hint grab / zoom-ready
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Meta' || e.key === 'Control') setModifierHeld(true)
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Meta' || e.key === 'Control') setModifierHeld(false)
+    }
+    const onBlur = () => setModifierHeld(false)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+    }
   }, [])
 
   useEffect(() => {
@@ -233,6 +292,68 @@ export const MermaidDiagram = memo(function MermaidDiagram({
     }
   }, [trimmed, cacheKey, prefixKey, isDark])
 
+  // Native wheel listener (non-passive) so ⌘/Ctrl+scroll can prevent page zoom/scroll.
+  useEffect(() => {
+    const el = viewportRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!isZoomModifier(e)) return
+      e.preventDefault()
+      e.stopPropagation()
+      const direction = e.deltaY > 0 ? -1 : 1
+      setTransform((prev) => {
+        const nextScale = clampScale(prev.scale * (1 + direction * ZOOM_STEP))
+        if (nextScale === prev.scale) return prev
+        return { ...prev, scale: nextScale }
+      })
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [svg])
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    if (!isZoomModifier(e) || e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    const t = transformRef.current
+    panRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: t.x,
+      originY: t.y,
+    }
+    setIsPanning(true)
+    viewportRef.current?.setPointerCapture(e.pointerId)
+  }, [])
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    const pan = panRef.current
+    if (!pan || pan.pointerId !== e.pointerId) return
+    e.preventDefault()
+    setTransform({
+      scale: transformRef.current.scale,
+      x: pan.originX + (e.clientX - pan.startX),
+      y: pan.originY + (e.clientY - pan.startY),
+    })
+  }, [])
+
+  const endPan = useCallback((e: React.PointerEvent) => {
+    const pan = panRef.current
+    if (!pan || pan.pointerId !== e.pointerId) return
+    panRef.current = null
+    setIsPanning(false)
+    try {
+      viewportRef.current?.releasePointerCapture(e.pointerId)
+    } catch {
+      // already released
+    }
+  }, [])
+
+  const resetView = useCallback(() => {
+    setTransform({ scale: DEFAULT_SCALE, x: 0, y: 0 })
+  }, [])
+
   if (!trimmed) return null
 
   if (!svg) {
@@ -243,18 +364,70 @@ export const MermaidDiagram = memo(function MermaidDiagram({
     )
   }
 
+  const zoomed =
+    transform.scale !== DEFAULT_SCALE || transform.x !== 0 || transform.y !== 0
+
   return (
     <div
-      dangerouslySetInnerHTML={{ __html: svg }}
       className={cn(
-        'mermaid-diagram flex justify-center items-center my-4 overflow-x-auto rounded-xl p-6 min-h-40 w-full border border-zinc-200 dark:border-zinc-700',
-        '[&_svg]:max-w-full [&_svg]:h-auto',
-        '[&_.nodeLabel]:text-[10px] [&_.nodeLabel]:leading-snug',
-        '[&_.edgeLabel]:text-[9px] [&_.edgeLabel]:leading-tight',
-        '[&_foreignObject_div]:!p-0 [&_foreignObject_span]:!leading-snug',
+        'mermaid-diagram group relative my-4 w-full overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-700',
         isRendering && 'opacity-90',
         isDark ? 'bg-zinc-900' : 'bg-white'
       )}
-    />
+      data-testid='jr-mermaid-diagram'
+    >
+      <div
+        ref={viewportRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endPan}
+        onPointerCancel={endPan}
+        onDoubleClick={(e) => {
+          if (isZoomModifier(e)) {
+            e.preventDefault()
+            resetView()
+          }
+        }}
+        title='⌘/Ctrl + scroll to zoom · ⌘/Ctrl + drag to pan · ⌘/Ctrl + double-click to reset'
+        className={cn(
+          'flex min-h-48 w-full items-center justify-center overflow-hidden p-6 touch-none',
+          modifierHeld || isPanning
+            ? isPanning
+              ? 'cursor-grabbing'
+              : 'cursor-grab'
+            : 'cursor-default'
+        )}
+      >
+        <div
+          dangerouslySetInnerHTML={{ __html: svg }}
+          style={{
+            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+            transformOrigin: 'center center',
+            width: '100%',
+          }}
+          className={cn(
+            'flex w-full justify-center [&_svg]:h-auto [&_svg]:max-w-full [&_svg]:w-full',
+            '[&_.nodeLabel]:text-[13px] [&_.nodeLabel]:leading-snug',
+            '[&_.edgeLabel]:text-[12px] [&_.edgeLabel]:leading-snug',
+            '[&_foreignObject_div]:!p-0 [&_foreignObject_span]:!leading-snug',
+            isPanning ? '' : 'transition-transform duration-75 ease-out'
+          )}
+        />
+      </div>
+      {zoomed && (
+        <button
+          type='button'
+          onClick={resetView}
+          className={cn(
+            'absolute right-2 top-2 rounded-md border px-2 py-1 text-[11px] font-medium opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100',
+            isDark
+              ? 'border-zinc-600 bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+              : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+          )}
+        >
+          Reset view
+        </button>
+      )}
+    </div>
   )
 })

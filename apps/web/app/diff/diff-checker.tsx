@@ -8,37 +8,38 @@ import {
   Save,
   FolderOpen,
   Eraser,
-  WrapText,
+  Braces,
   Plus,
   Minus,
   Equal,
-  Columns2,
-  Rows2,
   AlertCircle,
   CheckCircle2,
   X,
+  GitCompareArrows,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { saveDiff, updateDiff, type DiffRecord } from '@/lib/diff-db'
+import { Button } from '../components/ui/button'
+import { Pill } from '../components/ui/pill'
+import { SegmentedControl } from '../components/ui/segmented-control'
 import DiffHeader from './diff-header'
 import SavedDiffsModal from './saved-diffs-modal'
+import type { DiffStatsResult } from './diff-worker'
 
 // ─── Language auto-detection ──────────────────────────────────────────────────
 function detectLanguage(text: string): string | null {
   const trimmed = text.trim()
   if (!trimmed) return null
 
-  // JSON — starts with { or [ and is parseable
   if (/^[\[{]/.test(trimmed)) {
     try {
       JSON.parse(trimmed)
       return 'json'
     } catch {
-      // might still be JSON-like, check further
+      // might still be JSON-like
     }
   }
 
-  // HTML — starts with < and has closing tags
   if (
     /^<(!DOCTYPE|html|head|body|div|span|p|a|script|style|link|meta|section|header|footer|main|nav|table|form|ul|ol|li|h[1-6])/i.test(
       trimmed
@@ -48,22 +49,18 @@ function detectLanguage(text: string): string | null {
   if (/<\/?[a-z][a-z0-9]*[\s>]/i.test(trimmed) && /<\/[a-z]/i.test(trimmed))
     return 'html'
 
-  // XML — starts with <?xml or has xml-like structure without HTML tags
   if (/^<\?xml/i.test(trimmed)) return 'xml'
 
-  // Dockerfile
   if (
     /^FROM\s+\S+/m.test(trimmed) &&
     /^(RUN|CMD|COPY|ADD|ENV|EXPOSE|WORKDIR|ENTRYPOINT)\s/m.test(trimmed)
   )
     return 'dockerfile'
 
-  // YAML — key: value patterns, no braces
   if (/^[a-zA-Z_][a-zA-Z0-9_]*:\s/m.test(trimmed) && /^\s*-\s/m.test(trimmed))
     return 'yaml'
   if (/^---\s*$/m.test(trimmed)) return 'yaml'
 
-  // SQL
   if (
     /^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH|EXPLAIN)\s/im.test(
       trimmed
@@ -71,7 +68,6 @@ function detectLanguage(text: string): string | null {
   )
     return 'sql'
 
-  // Markdown — headings, links, code blocks
   if (
     /^#{1,6}\s/m.test(trimmed) &&
     (/\[.*\]\(.*\)/.test(trimmed) ||
@@ -80,7 +76,6 @@ function detectLanguage(text: string): string | null {
   )
     return 'markdown'
 
-  // GraphQL
   if (
     /^(type|query|mutation|subscription|fragment|schema|input|enum|interface|union)\s/m.test(
       trimmed
@@ -89,7 +84,6 @@ function detectLanguage(text: string): string | null {
   )
     return 'graphql'
 
-  // Shell / Bash
   if (/^#!\/bin\/(bash|sh|zsh)/m.test(trimmed)) return 'shell'
   if (
     /^(export|alias|source|echo|curl|wget|chmod|sudo|apt|brew|npm|yarn|pnpm|pip)\s/m.test(
@@ -98,7 +92,6 @@ function detectLanguage(text: string): string | null {
   )
     return 'shell'
 
-  // CSS / SCSS
   if (/^\s*(@import|@media|@keyframes|@font-face|:root)\s/m.test(trimmed))
     return 'css'
   if (/^\s*[.#][a-zA-Z][\w-]*\s*\{/m.test(trimmed)) return 'css'
@@ -109,7 +102,6 @@ function detectLanguage(text: string): string | null {
   )
     return 'scss'
 
-  // Rust
   if (
     /^(use\s+std::|fn\s+main|pub\s+(fn|struct|enum|mod|trait)|impl\s|let\s+mut\s|#\[derive)/m.test(
       trimmed
@@ -117,11 +109,9 @@ function detectLanguage(text: string): string | null {
   )
     return 'rust'
 
-  // Go
   if (/^package\s+\w+/m.test(trimmed) && /^func\s/m.test(trimmed)) return 'go'
   if (/^import\s+"/.test(trimmed) && /^func\s/m.test(trimmed)) return 'go'
 
-  // Python
   if (
     /^(def |class |import |from .+ import |if __name__|print\(|#.*coding)/m.test(
       trimmed
@@ -130,11 +120,9 @@ function detectLanguage(text: string): string | null {
     return 'python'
   if (/^\s*(elif |except |finally:)/m.test(trimmed)) return 'python'
 
-  // Java
   if (/^(package\s+[a-z]|import\s+java\.|public\s+class\s)/m.test(trimmed))
     return 'java'
 
-  // Kotlin
   if (
     /^(fun\s|val\s|var\s|data\s+class|sealed\s+class|object\s)/m.test(
       trimmed
@@ -143,7 +131,6 @@ function detectLanguage(text: string): string | null {
   )
     return 'kotlin'
 
-  // Swift
   if (
     /^(import\s+Foundation|import\s+UIKit|func\s|let\s|var\s|struct\s|class\s|protocol\s)/m.test(
       trimmed
@@ -152,7 +139,6 @@ function detectLanguage(text: string): string | null {
   )
     return 'swift'
 
-  // C#
   if (
     /^(using\s+System|namespace\s|public\s+class|private\s|protected\s)/m.test(
       trimmed
@@ -161,7 +147,6 @@ function detectLanguage(text: string): string | null {
   )
     return 'csharp'
 
-  // C++
   if (/^#include\s+[<"]/.test(trimmed)) return 'cpp'
   if (
     /^(std::|cout|cin|endl|namespace\s|template\s*<|class\s+\w+\s*\{)/m.test(
@@ -170,10 +155,8 @@ function detectLanguage(text: string): string | null {
   )
     return 'cpp'
 
-  // PHP
   if (/^<\?php/m.test(trimmed) || /^\$[a-zA-Z_]/.test(trimmed)) return 'php'
 
-  // TypeScript — check before JavaScript since TS is a superset
   if (/^(interface\s+\w+|type\s+\w+\s*=|enum\s+\w+)/m.test(trimmed))
     return 'typescript'
   if (
@@ -185,7 +168,6 @@ function detectLanguage(text: string): string | null {
   if (/^import\s.*from\s+['"]/.test(trimmed) && /<[A-Z]\w*>/.test(trimmed))
     return 'typescript'
 
-  // JavaScript
   if (
     /^(const|let|var|function|import|export|class|async|await|=>)\s/m.test(
       trimmed
@@ -194,21 +176,19 @@ function detectLanguage(text: string): string | null {
     return 'javascript'
   if (/^(module\.exports|require\()/.test(trimmed)) return 'javascript'
 
-  // YAML fallback (simple key: value)
   if (/^[a-zA-Z_][a-zA-Z0-9_]*:\s/m.test(trimmed) && !/[{};]/.test(trimmed))
     return 'yaml'
 
   return null
 }
 
-// ─── Diff stats type (matches what the worker sends back) ────────────────────
 interface DiffStats {
   additions: number
   deletions: number
   unchanged: number
+  approximate: boolean
 }
 
-// ─── Toast component (local) ─────────────────────────────────────────────────
 function DiffToast({
   message,
   type,
@@ -225,20 +205,23 @@ function DiffToast({
 
   return (
     <div
+      role='status'
       className={cn(
-        'fixed top-4 right-4 z-200 flex items-center gap-3 px-4 py-3 rounded-lg shadow-xl border animate-in slide-in-from-top-4 fade-in duration-300',
-        'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100'
+        'fixed top-4 right-4 z-[200] flex items-center gap-3 rounded-[10px] border px-4 py-3 shadow-xl animate-in slide-in-from-top-4 fade-in duration-300',
+        'border-[var(--jr-border)] bg-[var(--jr-surface)] text-[var(--jr-text)]'
       )}
     >
       {type === 'success' ? (
-        <CheckCircle2 className='w-5 h-5 text-emerald-500 shrink-0' />
+        <CheckCircle2 className='h-5 w-5 shrink-0 text-[var(--jr-accent)]' />
       ) : (
-        <AlertCircle className='w-5 h-5 text-red-500 shrink-0' />
+        <AlertCircle className='h-5 w-5 shrink-0 text-[var(--jr-danger)]' />
       )}
       <p className='text-sm font-medium'>{message}</p>
       <button
+        type='button'
         onClick={onClose}
-        className='ml-2 p-1 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors'
+        className='ml-2 rounded-md p-1 text-[var(--jr-muted)] transition-colors hover:text-[var(--jr-text)]'
+        aria-label='Dismiss'
       >
         <X size={16} />
       </button>
@@ -246,41 +229,61 @@ function DiffToast({
   )
 }
 
-// ─── JSON format helper ──────────────────────────────────────────────────────
-function tryFormatJson(value: string): string {
+function tryFormatJson(value: string): { formatted: string; ok: boolean } {
+  const trimmed = value.trim()
+  if (!trimmed) return { formatted: value, ok: false }
   try {
-    return JSON.stringify(JSON.parse(value), null, 2)
+    return {
+      formatted: JSON.stringify(JSON.parse(trimmed), null, 2),
+      ok: true,
+    }
   } catch {
-    return value
+    return { formatted: value, ok: false }
   }
 }
 
-// ─── Main Component ──────────────────────────────────────────────────────────
+const LANG_LABEL: Record<string, string> = {
+  plaintext: 'Text',
+  json: 'JSON',
+  javascript: 'JS',
+  typescript: 'TS',
+  html: 'HTML',
+  css: 'CSS',
+  scss: 'SCSS',
+  markdown: 'MD',
+  yaml: 'YAML',
+  xml: 'XML',
+  python: 'Python',
+  sql: 'SQL',
+  shell: 'Shell',
+  go: 'Go',
+  rust: 'Rust',
+  java: 'Java',
+  graphql: 'GraphQL',
+  dockerfile: 'Docker',
+}
+
+type ViewMode = 'side' | 'inline'
+
 export default function DiffChecker() {
   const { theme } = useTheme()
 
-  // Content lives in refs — NEVER fed back into DiffEditor props (prevents cursor reset)
   const originalRef = useRef('')
   const modifiedRef = useRef('')
-
-  // Language — fully auto-detected from content
   const languageRef = useRef('plaintext')
   const detectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const statsReqIdRef = useRef(0)
 
-  // View state
-  const [isInline, setIsInline] = useState(false)
-
-  // hasContent drives button enable/disable — updated from onChange listeners
+  const [viewMode, setViewMode] = useState<ViewMode>('side')
   const [hasContent, setHasContent] = useState(false)
-
-  // Diff stats (computed live)
+  const [detectedLanguage, setDetectedLanguage] = useState('plaintext')
   const [stats, setStats] = useState<DiffStats>({
     additions: 0,
     deletions: 0,
     unchanged: 0,
+    approximate: false,
   })
 
-  // Save/load state
   const [isSaving, setIsSaving] = useState(false)
   const [currentDiffId, setCurrentDiffId] = useState<number | null>(null)
   const [showSavedModal, setShowSavedModal] = useState(false)
@@ -289,19 +292,22 @@ export default function DiffChecker() {
     type: 'success' | 'error'
   } | null>(null)
 
-  // Monaco refs
   const monacoRef = useRef<any>(null)
   const diffEditorRef = useRef<any>(null)
   const statsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Web Worker for diff computation (runs off main thread)
   const workerRef = useRef<Worker | null>(null)
 
   useEffect(() => {
-    // Create worker on mount
     workerRef.current = new Worker(new URL('./diff-worker.ts', import.meta.url))
-    workerRef.current.onmessage = (e: MessageEvent<DiffStats>) => {
-      setStats(e.data)
+    workerRef.current.onmessage = (e: MessageEvent<DiffStatsResult>) => {
+      const data = e.data
+      if (data.id !== statsReqIdRef.current) return
+      setStats({
+        additions: data.additions,
+        deletions: data.deletions,
+        unchanged: data.unchanged,
+        approximate: data.approximate,
+      })
     }
 
     return () => {
@@ -310,10 +316,8 @@ export default function DiffChecker() {
     }
   }, [])
 
-  // ─── Resolve Monaco theme name ──────────────────────────────────────
   const monacoTheme = theme === 'dark' ? 'rock-dark' : 'rock-light'
 
-  // ─── Define themes & disable diagnostics BEFORE mount ───────────────
   const handleBeforeMount: BeforeMount = useCallback((monaco) => {
     monaco.editor.defineTheme('rock-dark', {
       base: 'vs-dark',
@@ -330,11 +334,10 @@ export default function DiffChecker() {
       rules: [],
       colors: {
         'editor.background': '#ffffff',
-        'editor.lineHighlightBackground': '#f4f4f5',
+        'editor.lineHighlightBackground': '#f8fafc',
       },
     })
 
-    // Disable all built-in diagnostics / LSP validation
     monaco.languages.json?.jsonDefaults?.setDiagnosticsOptions?.({
       validate: false,
       allowComments: true,
@@ -353,14 +356,12 @@ export default function DiffChecker() {
     })
   }, [])
 
-  // ─── Sync theme when user toggles dark/light ───────────────────────
   useEffect(() => {
     if (monacoRef.current) {
       monacoRef.current.editor.setTheme(monacoTheme)
     }
   }, [monacoTheme])
 
-  // ─── Apply language to Monaco models ────────────────────────────────
   const applyLanguage = useCallback((lang: string) => {
     if (!diffEditorRef.current || !monacoRef.current) return
     const monaco = monacoRef.current
@@ -370,46 +371,44 @@ export default function DiffChecker() {
     if (modModel) monaco.editor.setModelLanguage(modModel, lang)
   }, [])
 
-  // ─── Auto-detect language from content ──────────────────────────────
   const autoDetectLanguage = useCallback(
     (orig: string, mod: string) => {
       if (detectTimerRef.current) clearTimeout(detectTimerRef.current)
       detectTimerRef.current = setTimeout(() => {
-        // Use the longer text for better detection accuracy
         const sample = orig.length >= mod.length ? orig : mod
-        const detected = detectLanguage(sample)
-        if (detected && detected !== languageRef.current) {
+        const detected = detectLanguage(sample) || 'plaintext'
+        if (detected !== languageRef.current) {
           languageRef.current = detected
+          setDetectedLanguage(detected)
           applyLanguage(detected)
+        } else {
+          setDetectedLanguage(detected)
         }
       }, 300)
     },
     [applyLanguage]
   )
 
-  // ─── Debounced stats recomputation (via Web Worker) ─────────────────
   const recomputeStats = useCallback(
     (orig: string, mod: string) => {
       if (statsTimerRef.current) clearTimeout(statsTimerRef.current)
-      // Adaptive debounce: longer delay for larger content
       const charCount = orig.length + mod.length
       const delay = charCount > 200_000 ? 500 : charCount > 50_000 ? 300 : 150
       statsTimerRef.current = setTimeout(() => {
         setHasContent(!!(orig.trim() || mod.trim()))
-        workerRef.current?.postMessage({ original: orig, modified: mod })
+        const id = ++statsReqIdRef.current
+        workerRef.current?.postMessage({ id, original: orig, modified: mod })
       }, delay)
       autoDetectLanguage(orig, mod)
     },
     [autoDetectLanguage]
   )
 
-  // ─── DiffEditor mount — attach change listeners ────────────────────
   const handleDiffEditorMount = useCallback(
     (editor: any, monaco: any) => {
       diffEditorRef.current = editor
       monacoRef.current = monaco
 
-      // Set initial language on both models
       const origModel = editor.getOriginalEditor().getModel()
       const modModel = editor.getModifiedEditor().getModel()
       if (origModel)
@@ -417,20 +416,17 @@ export default function DiffChecker() {
       if (modModel)
         monaco.editor.setModelLanguage(modModel, languageRef.current)
 
-      // Apply custom theme
       monaco.editor.setTheme(monacoTheme)
 
       const origEditor = editor.getOriginalEditor()
       const modEditor = editor.getModifiedEditor()
 
-      // Listen for changes on original (left) side
       origEditor.onDidChangeModelContent(() => {
         const val = origEditor.getValue()
         originalRef.current = val
         recomputeStats(val, modifiedRef.current)
       })
 
-      // Listen for changes on modified (right) side
       modEditor.onDidChangeModelContent(() => {
         const val = modEditor.getValue()
         modifiedRef.current = val
@@ -440,7 +436,6 @@ export default function DiffChecker() {
     [monacoTheme, recomputeStats]
   )
 
-  // ─── Actions ────────────────────────────────────────────────────────
   const handleClear = useCallback(() => {
     const editor = diffEditorRef.current
     if (editor) {
@@ -450,32 +445,65 @@ export default function DiffChecker() {
     originalRef.current = ''
     modifiedRef.current = ''
     setHasContent(false)
-    setStats({ additions: 0, deletions: 0, unchanged: 0 })
+    setStats({ additions: 0, deletions: 0, unchanged: 0, approximate: false })
     setCurrentDiffId(null)
     languageRef.current = 'plaintext'
+    setDetectedLanguage('plaintext')
     applyLanguage('plaintext')
   }, [applyLanguage])
 
   const handleSwap = useCallback(() => {
     const editor = diffEditorRef.current
-    if (editor) {
-      const origVal = editor.getOriginalEditor().getValue()
-      const modVal = editor.getModifiedEditor().getValue()
-      editor.getOriginalEditor().setValue(modVal)
-      editor.getModifiedEditor().setValue(origVal)
-    }
-  }, [])
+    if (!editor) return
+    const origVal = editor.getOriginalEditor().getValue()
+    const modVal = editor.getModifiedEditor().getValue()
+    editor.getOriginalEditor().setValue(modVal)
+    editor.getModifiedEditor().setValue(origVal)
+    originalRef.current = modVal
+    modifiedRef.current = origVal
+    recomputeStats(modVal, origVal)
+  }, [recomputeStats])
 
   const handleFormatBoth = useCallback(() => {
-    if (languageRef.current !== 'json') return
     const editor = diffEditorRef.current
-    if (editor) {
-      const origFormatted = tryFormatJson(editor.getOriginalEditor().getValue())
-      const modFormatted = tryFormatJson(editor.getModifiedEditor().getValue())
-      editor.getOriginalEditor().setValue(origFormatted)
-      editor.getModifiedEditor().setValue(modFormatted)
+    if (!editor) return
+
+    const origVal = editor.getOriginalEditor().getValue()
+    const modVal = editor.getModifiedEditor().getValue()
+    const left = tryFormatJson(origVal)
+    const right = tryFormatJson(modVal)
+
+    if (!left.ok && !right.ok) {
+      setToast({
+        message: 'Format needs valid JSON in at least one pane.',
+        type: 'error',
+      })
+      return
     }
-  }, [])
+
+    if (left.ok) editor.getOriginalEditor().setValue(left.formatted)
+    if (right.ok) editor.getModifiedEditor().setValue(right.formatted)
+
+    languageRef.current = 'json'
+    setDetectedLanguage('json')
+    applyLanguage('json')
+
+    const nextOrig = left.ok ? left.formatted : origVal
+    const nextMod = right.ok ? right.formatted : modVal
+    originalRef.current = nextOrig
+    modifiedRef.current = nextMod
+    recomputeStats(nextOrig, nextMod)
+
+    setToast({
+      message:
+        left.ok && right.ok
+          ? 'Both panes formatted.'
+          : left.ok
+            ? 'Left pane formatted.'
+            : 'Right pane formatted.',
+      type: 'success',
+    })
+  }, [applyLanguage, recomputeStats])
 
   const handleSave = useCallback(async () => {
     const orig = originalRef.current
@@ -504,7 +532,7 @@ export default function DiffChecker() {
           original: orig,
           modified: mod,
         })
-        setToast({ message: 'Comparison updated!', type: 'success' })
+        setToast({ message: 'Comparison updated.', type: 'success' })
       } else {
         const id = await saveDiff({
           name,
@@ -514,7 +542,7 @@ export default function DiffChecker() {
           updatedAt: now,
         })
         setCurrentDiffId(id)
-        setToast({ message: 'Comparison saved locally!', type: 'success' })
+        setToast({ message: 'Comparison saved locally.', type: 'success' })
       }
     } catch (e) {
       console.error('Save failed:', e)
@@ -524,19 +552,22 @@ export default function DiffChecker() {
     }
   }, [currentDiffId])
 
-  const handleLoadDiff = useCallback((diff: DiffRecord) => {
-    const editor = diffEditorRef.current
-    if (editor) {
-      editor.getOriginalEditor().setValue(diff.original)
-      editor.getModifiedEditor().setValue(diff.modified)
-    }
-    originalRef.current = diff.original
-    modifiedRef.current = diff.modified
-    setHasContent(!!(diff.original.trim() || diff.modified.trim()))
-    setCurrentDiffId(diff.id ?? null)
-  }, [])
+  const handleLoadDiff = useCallback(
+    (diff: DiffRecord) => {
+      const editor = diffEditorRef.current
+      if (editor) {
+        editor.getOriginalEditor().setValue(diff.original)
+        editor.getModifiedEditor().setValue(diff.modified)
+      }
+      originalRef.current = diff.original
+      modifiedRef.current = diff.modified
+      setHasContent(!!(diff.original.trim() || diff.modified.trim()))
+      setCurrentDiffId(diff.id ?? null)
+      recomputeStats(diff.original, diff.modified)
+    },
+    [recomputeStats]
+  )
 
-  // ─── Shared Monaco options ─────────────────────────────────────────
   const editorOptions = {
     minimap: { enabled: false },
     fontSize: 13,
@@ -557,26 +588,67 @@ export default function DiffChecker() {
   }
 
   const hasChanges = stats.additions > 0 || stats.deletions > 0
+  const langLabel =
+    LANG_LABEL[detectedLanguage] ?? detectedLanguage.toUpperCase()
+
+  const StatsBadges = ({ compact = false }: { compact?: boolean }) => (
+    <div
+      className={cn(
+        'flex items-center gap-1.5',
+        compact ? 'justify-center' : ''
+      )}
+      title={
+        stats.approximate
+          ? 'Approximate line counts (very large / divergent files)'
+          : 'Line-level change counts'
+      }
+    >
+      <span
+        className={cn(
+          'inline-flex items-center gap-1 rounded-lg font-semibold text-[var(--jr-accent-hover)] bg-[var(--jr-accent-soft)]',
+          compact ? 'px-2 py-0.5 text-[11px]' : 'px-2 py-1 text-xs'
+        )}
+      >
+        <Plus size={compact ? 10 : 12} />
+        {stats.additions}
+      </span>
+      <span
+        className={cn(
+          'inline-flex items-center gap-1 rounded-lg font-semibold text-[var(--jr-danger)] bg-[var(--jr-danger-soft)]',
+          compact ? 'px-2 py-0.5 text-[11px]' : 'px-2 py-1 text-xs'
+        )}
+      >
+        <Minus size={compact ? 10 : 12} />
+        {stats.deletions}
+      </span>
+      <span
+        className={cn(
+          'inline-flex items-center gap-1 rounded-lg font-semibold text-[var(--jr-text-2)] bg-[var(--jr-hover)]',
+          compact ? 'px-2 py-0.5 text-[11px]' : 'px-2 py-1 text-xs'
+        )}
+      >
+        <Equal size={compact ? 10 : 12} />
+        {stats.unchanged}
+        {stats.approximate ? '~' : ''}
+      </span>
+    </div>
+  )
 
   return (
-    <div className='h-screen flex flex-col bg-white dark:bg-zinc-950 transition-colors'>
+    <div
+      data-testid='diff-checker'
+      className='flex h-screen flex-col bg-[var(--jr-bg)] text-[14px] text-[var(--jr-text)]'
+    >
       <DiffHeader isSaving={isSaving} />
 
-      {/* Toolbar */}
-      <div className='shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50'>
-        <div className='flex items-center justify-between px-3 lg:px-6 py-2 gap-2 overflow-x-auto'>
-          {/* Left: Actions */}
-          <div className='flex items-center gap-2 shrink-0'>
-            {/* Save */}
-            <button
-              onClick={handleSave}
+      <div className='shrink-0 border-b border-[var(--jr-border)] bg-[var(--jr-surface)]'>
+        <div className='flex items-center justify-between gap-3 overflow-x-auto px-4 py-2.5 lg:px-7'>
+          <div className='flex shrink-0 items-center gap-1.5'>
+            <Button
+              size='sm'
+              variant='primary'
+              onClick={() => void handleSave()}
               disabled={isSaving || !hasContent}
-              className={cn(
-                'flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all',
-                hasContent
-                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-900/20 active:scale-[0.97]'
-                  : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
-              )}
               title={
                 currentDiffId
                   ? 'Update saved comparison'
@@ -588,133 +660,112 @@ export default function DiffChecker() {
               <span className='hidden sm:inline'>
                 {currentDiffId ? 'Update' : 'Save'}
               </span>
-            </button>
+            </Button>
 
-            {/* Load */}
-            <button
+            <Button
+              size='sm'
+              variant='secondary'
               onClick={() => setShowSavedModal(true)}
-              className={cn(
-                'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-all',
-                'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700',
-                'text-zinc-700 dark:text-zinc-300 hover:border-emerald-300 dark:hover:border-emerald-700',
-                'hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
-              )}
               title='Load saved comparison'
               id='btn-load'
             >
               <FolderOpen size={15} />
               <span className='hidden sm:inline'>Load</span>
-            </button>
+            </Button>
 
-            <div className='h-5 w-px bg-zinc-200 dark:bg-zinc-700 mx-0.5 hidden sm:block' />
+            <div className='mx-1 hidden h-5 w-px bg-[var(--jr-border)] sm:block' />
 
-            {/* Swap */}
-            <button
+            <Button
+              size='sm'
+              variant='ghost'
               onClick={handleSwap}
               disabled={!hasContent}
-              className={cn(
-                'flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-all',
-                'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800',
-                'disabled:opacity-40 disabled:cursor-not-allowed'
-              )}
               title='Swap left ↔ right'
               id='btn-swap'
             >
               <ArrowRightLeft size={15} />
               <span className='hidden lg:inline'>Swap</span>
-            </button>
+            </Button>
 
-            {/* Format (always shown — handler checks if content is JSON) */}
-            <button
+            <Button
+              size='sm'
+              variant='ghost'
               onClick={handleFormatBoth}
               disabled={!hasContent}
-              className={cn(
-                'flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-all',
-                'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800',
-                'disabled:opacity-40 disabled:cursor-not-allowed'
-              )}
-              title='Format JSON'
+              title='Pretty-print JSON in either pane'
               id='btn-format'
             >
-              <WrapText size={15} />
+              <Braces size={15} />
               <span className='hidden lg:inline'>Format</span>
-            </button>
+            </Button>
 
-            {/* Clear */}
-            <button
+            <Button
+              size='sm'
+              variant='ghost'
               onClick={handleClear}
               disabled={!hasContent}
-              className={cn(
-                'flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-all',
-                'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800',
-                'disabled:opacity-40 disabled:cursor-not-allowed'
-              )}
               title='Clear both editors'
               id='btn-clear'
             >
               <Eraser size={15} />
               <span className='hidden lg:inline'>Clear</span>
-            </button>
+            </Button>
           </div>
 
-          {/* Right: Language + Stats + View toggle */}
-          <div className='flex items-center gap-2 shrink-0'>
-            {/* Stats badges */}
+          <div className='flex shrink-0 items-center gap-2'>
+            {hasContent && detectedLanguage !== 'plaintext' && (
+              <Pill tone='accent' className='hidden sm:inline-flex normal-case'>
+                {langLabel}
+              </Pill>
+            )}
+
             {hasChanges && (
-              <div className='hidden sm:flex items-center gap-1.5 mr-1'>
-                <span className='inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'>
-                  <Plus size={12} />
-                  {stats.additions}
-                </span>
-                <span className='inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'>
-                  <Minus size={12} />
-                  {stats.deletions}
-                </span>
-                <span className='inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'>
-                  <Equal size={12} />
-                  {stats.unchanged}
-                </span>
+              <div className='mr-1 hidden sm:block'>
+                <StatsBadges />
               </div>
             )}
 
-            {/* Inline / Side-by-side toggle */}
-            <div className='flex items-center rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden'>
-              <button
-                onClick={() => setIsInline(false)}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all',
-                  !isInline
-                    ? 'bg-emerald-600 text-white'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                )}
-                title='Side by side'
-              >
-                <Columns2 size={14} />
-                <span className='hidden md:inline'>Side by Side</span>
-              </button>
-              <button
-                onClick={() => setIsInline(true)}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all',
-                  isInline
-                    ? 'bg-emerald-600 text-white'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                )}
-                title='Inline'
-              >
-                <Rows2 size={14} />
-                <span className='hidden md:inline'>Inline</span>
-              </button>
-            </div>
+            <SegmentedControl
+              ariaLabel='Diff view mode'
+              value={viewMode}
+              onChange={setViewMode}
+              options={[
+                {
+                  value: 'side',
+                  label: 'Side by Side',
+                  testId: 'diff-view-side',
+                },
+                {
+                  value: 'inline',
+                  label: 'Inline',
+                  testId: 'diff-view-inline',
+                },
+              ]}
+            />
           </div>
         </div>
       </div>
 
-      {/* ─── DiffEditor (always visible, always editable) ────────────── */}
-      {/* IMPORTANT: original="" and modified="" are initial values only.
-          Content is managed via editor instances (refs) — never fed back
-          as props, which would cause cursor-reset on every keystroke. */}
-      <div className='flex-1 min-h-0 diff-editor-container'>
+      <div className='relative min-h-0 flex-1 diff-editor-container'>
+        {!hasContent && (
+          <div
+            className='pointer-events-none absolute inset-0 z-10 flex items-start justify-center pt-16'
+            aria-hidden
+          >
+            <div className='flex max-w-md flex-col items-center gap-2 rounded-[14px] border border-dashed border-[var(--jr-border)] bg-[var(--jr-surface)]/90 px-6 py-5 text-center shadow-sm backdrop-blur-sm'>
+              <span className='flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--jr-accent-soft)] text-[var(--jr-accent-hover)]'>
+                <GitCompareArrows size={20} />
+              </span>
+              <p className='m-0 text-[15px] font-semibold text-[var(--jr-text)]'>
+                Compare two versions
+              </p>
+              <p className='m-0 text-[13px] leading-relaxed text-[var(--jr-muted)]'>
+                Paste original on the left and modified on the right. Language
+                is detected automatically — use Format for JSON.
+              </p>
+            </div>
+          </div>
+        )}
         <DiffEditor
           height='100%'
           language='plaintext'
@@ -727,7 +778,7 @@ export default function DiffChecker() {
             ...editorOptions,
             readOnly: false,
             originalEditable: true,
-            renderSideBySide: !isInline,
+            renderSideBySide: viewMode === 'side',
             enableSplitViewResizing: true,
             ignoreTrimWhitespace: false,
             renderIndicators: true,
@@ -737,32 +788,18 @@ export default function DiffChecker() {
         />
       </div>
 
-      {/* Mobile stats bar */}
       {hasChanges && (
-        <div className='shrink-0 flex sm:hidden items-center justify-center gap-2 px-4 py-1.5 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50'>
-          <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'>
-            <Plus size={10} />
-            {stats.additions}
-          </span>
-          <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'>
-            <Minus size={10} />
-            {stats.deletions}
-          </span>
-          <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'>
-            <Equal size={10} />
-            {stats.unchanged}
-          </span>
+        <div className='flex shrink-0 items-center justify-center gap-2 border-t border-[var(--jr-border)] bg-[var(--jr-surface)] px-4 py-1.5 sm:hidden'>
+          <StatsBadges compact />
         </div>
       )}
 
-      {/* Saved diffs modal */}
       <SavedDiffsModal
         isOpen={showSavedModal}
         onClose={() => setShowSavedModal(false)}
         onLoad={handleLoadDiff}
       />
 
-      {/* Toast */}
       {toast && (
         <DiffToast
           message={toast.message}

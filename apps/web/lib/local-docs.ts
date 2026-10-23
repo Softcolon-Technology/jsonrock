@@ -91,7 +91,8 @@ export function truncateDocumentTitle(title: string): string {
 
 function stringifyScalar(value: unknown): string | null {
   if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (typeof value === 'number' || typeof value === 'boolean')
+    return String(value)
   return null
 }
 
@@ -208,8 +209,7 @@ function ensureRecordShape(
   }
 ): LocalDocumentRecord {
   const titleIsCustom = raw.titleIsCustom === true
-  const existingTitle =
-    typeof raw.title === 'string' ? raw.title.trim() : ''
+  const existingTitle = typeof raw.title === 'string' ? raw.title.trim() : ''
 
   let title: string
   if (titleIsCustom && existingTitle) {
@@ -217,7 +217,8 @@ function ensureRecordShape(
   } else if (existingTitle) {
     title = truncateDocumentTitle(existingTitle)
   } else {
-    title = deriveDocumentTitle(raw.content || '', raw.type)
+    // Never invent a title from file body — keep list/editor on "Untitled …".
+    title = DEFAULT_DOCUMENT_TITLE[raw.type]
   }
 
   return {
@@ -246,7 +247,9 @@ function needsTitleBackfill(
   return false
 }
 
-async function putRecord(record: LocalDocumentRecord): Promise<LocalDocumentRecord> {
+async function putRecord(
+  record: LocalDocumentRecord
+): Promise<LocalDocumentRecord> {
   const db = await openDb()
 
   return new Promise((resolve, reject) => {
@@ -289,6 +292,39 @@ async function getRawBySlug(
 }
 
 /**
+ * Pick the title to store on save.
+ * Custom renames always win. Otherwise keep the existing title, or fall back
+ * to "Untitled …". Content is never used as the name (starter markdown/JSON/HTML
+ * would otherwise rename the file to its first heading / key / <title>).
+ */
+function resolveTitleOnSave(
+  _content: string,
+  type: LocalDocumentType,
+  existing: Partial<LocalDocumentRecord> | null
+): { title: string; titleIsCustom: boolean } {
+  const titleIsCustom = existing?.titleIsCustom === true
+  const existingTitle =
+    typeof existing?.title === 'string' ? existing.title.trim() : ''
+  const fallback = DEFAULT_DOCUMENT_TITLE[type]
+
+  if (titleIsCustom && existingTitle) {
+    return {
+      title: truncateDocumentTitle(existingTitle),
+      titleIsCustom: true,
+    }
+  }
+
+  if (existingTitle) {
+    return {
+      title: truncateDocumentTitle(existingTitle),
+      titleIsCustom: false,
+    }
+  }
+
+  return { title: fallback, titleIsCustom: false }
+}
+
+/**
  * Persist a local document snapshot.
  * Titles are LOCAL-ONLY (IndexedDB) — never part of the server/E2E payload.
  */
@@ -300,11 +336,11 @@ export async function saveLocalDocument(
   }
 
   const existing = await getRawBySlug(input.slug)
-  const titleIsCustom = existing?.titleIsCustom === true
-  const title =
-    titleIsCustom && typeof existing?.title === 'string' && existing.title.trim()
-      ? truncateDocumentTitle(existing.title)
-      : deriveDocumentTitle(input.content, input.type)
+  const { title, titleIsCustom } = resolveTitleOnSave(
+    input.content,
+    input.type,
+    existing
+  )
 
   const record: LocalDocumentRecord = {
     slug: input.slug,
@@ -324,7 +360,7 @@ export async function saveLocalDocument(
 
 /**
  * Rename a local document from the Local History modal.
- * Empty/whitespace input → re-derive auto title and clear titleIsCustom.
+ * Empty/whitespace input → reset to the type’s default "Untitled …" title.
  */
 export async function updateLocalDocumentTitle(
   slug: string,
@@ -344,7 +380,7 @@ export async function updateLocalDocumentTitle(
   let titleIsCustom: boolean
 
   if (!trimmed) {
-    title = deriveDocumentTitle(existing.content || '', existing.type)
+    title = DEFAULT_DOCUMENT_TITLE[existing.type]
     titleIsCustom = false
   } else {
     title = truncateDocumentTitle(trimmed)
@@ -414,7 +450,9 @@ export async function listLocalDocuments(): Promise<LocalDocumentRecord[]> {
 
       request.onsuccess = () => {
         resolve(
-          ((request.result as Partial<LocalDocumentRecord>[] | undefined) || []).slice()
+          (
+            (request.result as Partial<LocalDocumentRecord>[] | undefined) || []
+          ).slice()
         )
       }
       request.onerror = () =>
@@ -473,6 +511,9 @@ export async function deleteLocalDocumentBySlug(slug: string): Promise<void> {
   })
 }
 
+/** Alias of {@link deleteLocalDocumentBySlug}. */
+export const deleteLocalDocument = deleteLocalDocumentBySlug
+
 export async function clearLocalDocuments(): Promise<void> {
   if (!isIndexedDbAvailable()) {
     return
@@ -496,3 +537,6 @@ export async function clearLocalDocuments(): Promise<void> {
 }
 
 export const DOCUMENT_TITLE_MAX_LENGTH = TITLE_MAX_LENGTH
+
+/** Alias of {@link updateLocalDocumentTitle} — keeps the local copy in sync after a remote rename. */
+export const syncTitle = updateLocalDocumentTitle

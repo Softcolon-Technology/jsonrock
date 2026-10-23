@@ -1,5 +1,9 @@
 import type { Metadata } from 'next'
+import { auth } from '@clerk/nextjs/server'
+import { redirect } from 'next/navigation'
 import LandingPage from './landing-page'
+import { isProjectsEnabled } from '@/lib/feature-flags'
+import { signedInHomePath } from '@/lib/home'
 
 export const metadata: Metadata = {
   alternates: {
@@ -42,6 +46,10 @@ export const metadata: Metadata = {
   },
 }
 
-export default function Home() {
+export default async function Home() {
+  if (isProjectsEnabled) {
+    const { userId } = await auth()
+    if (userId) redirect(signedInHomePath())
+  }
   return <LandingPage />
 }

@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose'
+import mongoose, { Schema, Document, Types } from 'mongoose'
 import { ModeEnum, AccessTypeEnum, ShareTypeEnum } from '../enums/enum'
 
 export type JsonShareMode = 'visualize' | 'tree' | 'formatter'
@@ -8,6 +8,12 @@ export type ShareType = 'json' | 'text' | 'markdown' | 'html'
 export interface IShareLink extends Document {
   slug: string
   ownerId?: string // Clerk User ID
+  /** Optional display title shown in the Library (max 60 chars). */
+  title?: string
+  /** Project this share belongs to; null/missing = standalone. */
+  projectId?: Types.ObjectId | null
+  /** Labels from the personal or project catalog (multi-assign). */
+  labelIds?: Types.ObjectId[]
   type: ShareType
   schemaVersion?: number // 1 = legacy plaintext, 2 = E2EE AES-256-GCM
   json?: string // Legacy plaintext content
@@ -39,6 +45,17 @@ const ShareLinkSchema: Schema = new Schema(
   {
     slug: { type: String, required: true, unique: true },
     ownerId: { type: String },
+    title: { type: String, maxlength: 60, trim: true },
+    projectId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Project',
+      default: null,
+      index: true,
+    },
+    labelIds: {
+      type: [{ type: Schema.Types.ObjectId, ref: 'FileLabel' }],
+      default: [],
+    },
     type: { type: String, enum: ShareTypeEnum, default: ShareTypeEnum.JSON },
     schemaVersion: { type: Number },
     json: { type: String },

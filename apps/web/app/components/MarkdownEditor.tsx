@@ -774,6 +774,10 @@ export default function MarkdownEditor({
   const containerRef = React.useRef<HTMLDivElement>(null)
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const previewRef = React.useRef<HTMLDivElement>(null)
+  /** Live width while dragging — avoids re-rendering the preview every move. */
+  const leftWidthRef = React.useRef(50)
+  const draggingRef = React.useRef(false)
+  const resizeRafRef = React.useRef<number | null>(null)
   /** Which pane is driving scroll sync — blocks echo until the lock clears. */
   const scrollDriverRef = React.useRef<'source' | 'preview' | null>(null)
   const scrollUnlockTimerRef = React.useRef<ReturnType<
@@ -878,42 +882,89 @@ export default function MarkdownEditor({
         clearTimeout(scrollUnlockTimerRef.current)
       if (scrollRafRef.current != null)
         cancelAnimationFrame(scrollRafRef.current)
+      if (resizeRafRef.current != null)
+        cancelAnimationFrame(resizeRafRef.current)
     }
   }, [])
 
-  // ── Resizing ───────────────────────────────────────────────────────────────
-  const startResizing = React.useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    setIsDragging(true)
+  // ── Resizing (DOM during drag; React state only on release) ────────────────
+  const applyLeftWidth = React.useCallback((pct: number) => {
+    const clamped = Math.min(80, Math.max(20, pct))
+    leftWidthRef.current = clamped
+    containerRef.current?.style.setProperty(
+      '--editor-left-width',
+      `${clamped}%`
+    )
   }, [])
-  const stopResizing = React.useCallback(() => setIsDragging(false), [])
-  const resize = React.useCallback(
-    (e: MouseEvent) => {
-      if (isDragging && containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect()
-        const pct = ((e.clientX - rect.left) / rect.width) * 100
-        if (pct > 20 && pct < 80) setLeftWidth(pct)
-      }
+
+  const startResizing = React.useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      draggingRef.current = true
+      setIsDragging(true)
     },
-    [isDragging]
+    []
+  )
+
+  const onResizePointerMove = React.useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (
+        !draggingRef.current ||
+        !e.currentTarget.hasPointerCapture(e.pointerId)
+      )
+        return
+      const container = containerRef.current
+      if (!container) return
+      const clientX = e.clientX
+      if (resizeRafRef.current != null)
+        cancelAnimationFrame(resizeRafRef.current)
+      resizeRafRef.current = requestAnimationFrame(() => {
+        resizeRafRef.current = null
+        const rect = container.getBoundingClientRect()
+        if (rect.width <= 0) return
+        applyLeftWidth(((clientX - rect.left) / rect.width) * 100)
+      })
+    },
+    [applyLeftWidth]
+  )
+
+  const stopResizing = React.useCallback(
+    (e?: React.PointerEvent<HTMLDivElement>) => {
+      if (e?.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      }
+      if (!draggingRef.current) return
+      draggingRef.current = false
+      if (resizeRafRef.current != null) {
+        cancelAnimationFrame(resizeRafRef.current)
+        resizeRafRef.current = null
+      }
+      setLeftWidth(leftWidthRef.current)
+      setIsDragging(false)
+    },
+    []
   )
 
   useEffect(() => {
-    if (isDragging) {
-      window.addEventListener('mousemove', resize)
-      window.addEventListener('mouseup', stopResizing)
-      document.body.style.cursor = 'col-resize'
-    } else {
-      window.removeEventListener('mousemove', resize)
-      window.removeEventListener('mouseup', stopResizing)
-      document.body.style.cursor = 'default'
-    }
+    leftWidthRef.current = leftWidth
+    containerRef.current?.style.setProperty(
+      '--editor-left-width',
+      `${leftWidth}%`
+    )
+  }, [leftWidth])
+
+  useEffect(() => {
+    if (!isDragging) return
+    const prevCursor = document.body.style.cursor
+    const prevSelect = document.body.style.userSelect
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
     return () => {
-      window.removeEventListener('mousemove', resize)
-      window.removeEventListener('mouseup', stopResizing)
-      document.body.style.cursor = 'default'
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevSelect
     }
-  }, [isDragging, resize, stopResizing])
+  }, [isDragging])
 
   // ── Drag & Drop (file import) ──────────────────────────────────────────────
   const handleDragOver = (e: React.DragEvent) => {
@@ -946,7 +997,10 @@ export default function MarkdownEditor({
   return (
     <div
       ref={containerRef}
-      className='flex h-full w-full overflow-hidden bg-white dark:bg-[#050505] flex-col md:flex-row relative'
+      className={cn(
+        'flex h-full w-full overflow-hidden bg-white dark:bg-[#050505] flex-col md:flex-row relative',
+        isDragging && 'select-none'
+      )}
       style={{ '--editor-left-width': `${leftWidth}%` } as React.CSSProperties}
     >
       {/* ── Left Pane — Raw Editor ─────────────────────────────────────── */}
@@ -1067,13 +1121,27 @@ export default function MarkdownEditor({
       {/* ── Drag Handle ───────────────────────────────────────────────── */}
       {!effectivelyCollapsed && (
         <div
-          className='hidden md:flex w-1.5 bg-transparent hover:bg-emerald-500/30 dark:hover:bg-emerald-500/20 cursor-col-resize z-40 items-center justify-center transition-colors shrink-0'
-          onMouseDown={startResizing}
+          role='separator'
+          aria-orientation='vertical'
+          aria-label='Resize editor and preview'
+          className={cn(
+            'hidden md:flex w-1.5 bg-transparent hover:bg-[#00B3B7]/30 dark:hover:bg-[#00B3B7]/20 cursor-col-resize z-40 items-center justify-center shrink-0 touch-none',
+            isDragging && 'bg-[#00B3B7]/40'
+          )}
+          onPointerDown={startResizing}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={stopResizing}
+          onPointerCancel={stopResizing}
         />
       )}
 
       {/* ── Right Pane — Preview ──────────────────────────────────────── */}
-      <div className='flex-1 overflow-hidden bg-white dark:bg-[#0a0a0a] min-w-50 flex flex-col relative'>
+      <div
+        className={cn(
+          'flex-1 overflow-hidden bg-white dark:bg-[#0a0a0a] min-w-50 flex flex-col relative',
+          isDragging && 'pointer-events-none'
+        )}
+      >
         <div className='flex items-center px-4 py-1 bg-linear-to-b from-gray-50 to-gray-100 dark:from-zinc-800 dark:to-zinc-900 border-b border-zinc-300 dark:border-zinc-700 h-11 shrink-0 gap-2'>
           <span className='text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider'>
             Preview

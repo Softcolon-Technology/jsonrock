@@ -6,7 +6,6 @@ import {
   Globe,
   Lock,
   Check,
-  ChevronDown,
   Users,
   Eye,
   EyeOff,
@@ -14,6 +13,7 @@ import {
   Link2,
   Send,
   AlertCircle,
+  UserPlus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ShareType } from '@/app/iterface'
@@ -64,6 +64,8 @@ interface SharePopoverProps {
 
   isSavingSettings?: boolean
   shareUrl?: string
+  /** When set, shows an "Invite to project" card linking to the project's People panel. */
+  projectId?: string | null
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -84,8 +86,8 @@ export function SharePopover({
   onSendShareEmail,
   isSavingSettings = false,
   shareUrl = '',
+  projectId = null,
 }: SharePopoverProps) {
-  const [accessLevel, setAccessLevel] = useState<AccessType>(defaultAccessLevel)
   const [isPrivateLink, setIsPrivateLink] = useState(defaultIsPrivate)
   const [sharePassword, setSharePassword] = useState(defaultPassword)
   const [previewOnly, setPreviewOnly] = useState(defaultPreviewOnly)
@@ -101,10 +103,9 @@ export function SharePopover({
   } | null>(null)
   const [isSendingEmail, setIsSendingEmail] = useState(false)
 
-  // Reset state when opening
+  // Reset state when opening — link access is always viewer.
   useEffect(() => {
     if (isOpen) {
-      setAccessLevel(defaultAccessLevel)
       setIsPrivateLink(defaultIsPrivate)
       setSharePassword(defaultPassword)
       setPreviewOnly(defaultPreviewOnly)
@@ -115,13 +116,7 @@ export function SharePopover({
       setEmailStatus(null)
       setIsSendingEmail(false)
     }
-  }, [
-    isOpen,
-    defaultAccessLevel,
-    defaultIsPrivate,
-    defaultPassword,
-    defaultPreviewOnly,
-  ])
+  }, [isOpen, defaultIsPrivate, defaultPassword, defaultPreviewOnly])
 
   if (!isOpen) return null
 
@@ -129,7 +124,7 @@ export function SharePopover({
     isPrivateLink && (!sharePassword || sharePassword.length < 4)
 
   const currentSettings = (): ShareSettingsPayload => ({
-    accessLevel,
+    accessLevel: 'viewer',
     isPrivateLink,
     sharePassword,
     previewOnly: documentType === 'markdown' ? previewOnly : false,
@@ -239,36 +234,23 @@ export function SharePopover({
               'opacity-50 pointer-events-none select-none'
           )}
         >
-          {/* Row 1: Access Type & Privacy */}
-          <div className='flex items-start gap-4'>
-            <div className='flex-1 flex flex-col gap-1.5'>
-              <label className='text-xs font-medium text-zinc-500 uppercase tracking-wider'>
-                Access
-              </label>
-              <div className='relative group'>
-                <select
-                  value={accessLevel}
-                  onChange={(e) => setAccessLevel(e.target.value as AccessType)}
-                  disabled={documentType === 'markdown' && previewOnly}
-                  className={cn(
-                    'w-full appearance-none bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2.5 text-sm text-zinc-900 focus:ring-1 focus:ring-emerald-500/50 outline-none cursor-pointer hover:border-zinc-300 transition-colors',
-                    !forceLightMode &&
-                      'dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-200 dark:hover:border-zinc-700',
-                    documentType === 'markdown' &&
-                      previewOnly &&
-                      'opacity-60 cursor-not-allowed'
-                  )}
-                >
-                  <option value='viewer'>Viewer (Read Only)</option>
-                  <option value='editor'>Editor (Collaborate)</option>
-                </select>
-                <ChevronDown
-                  size={14}
-                  className='absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none'
-                />
-              </div>
-            </div>
+          {/* Link shares are always view-only; edit requires Workspace membership. */}
+          <div
+            data-testid='jr-share-view-only-note'
+            className={cn(
+              'rounded-lg border border-[#00B3B7]/25 bg-[#00B3B7]/8 px-3 py-2.5 text-[12px] leading-snug text-[#007a7d]',
+              !forceLightMode &&
+                'dark:border-[#00B3B7]/30 dark:bg-[#00B3B7]/10 dark:text-[#5ed4d7]'
+            )}
+          >
+            <span className='font-semibold'>View-only link.</span>{' '}
+            {projectId
+              ? 'Anyone with the link can read. To edit, invite them to this project in People.'
+              : 'Anyone with the link can read. Only you (and project members, if you move it into a project) can edit.'}
+          </div>
 
+          {/* Row 1: Visibility */}
+          <div className='flex items-start gap-4'>
             <div className='flex-1 flex flex-col gap-1.5'>
               <label className='text-xs font-medium text-zinc-500 uppercase tracking-wider'>
                 Visibility
@@ -386,11 +368,7 @@ export function SharePopover({
               <input
                 type='checkbox'
                 checked={previewOnly}
-                onChange={(e) => {
-                  const next = e.target.checked
-                  setPreviewOnly(next)
-                  if (next) setAccessLevel('viewer')
-                }}
+                onChange={(e) => setPreviewOnly(e.target.checked)}
                 className='mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500'
               />
               <span className='flex flex-col gap-0.5 min-w-0'>
@@ -399,7 +377,7 @@ export function SharePopover({
                 </span>
                 <span className='text-[11px] text-zinc-500 dark:text-zinc-400 leading-snug'>
                   Recipients see a clean, read-only rendered article — no source
-                  editor or editing, regardless of access level.
+                  editor.
                 </span>
               </span>
             </label>
@@ -589,6 +567,33 @@ export function SharePopover({
               </span>
             </div>
           </div>
+
+          {projectId ? (
+            <div
+              data-testid='jr-share-invite-card'
+              className='p-3 rounded-xl border border-[#a7f3d0] bg-[#ecfdf5] flex items-center justify-between gap-3'
+            >
+              <div className='flex items-center gap-3 min-w-0'>
+                <span className='w-9 h-9 rounded-[10px] bg-white text-[#047857] flex items-center justify-center shrink-0'>
+                  <UserPlus size={18} aria-hidden='true' />
+                </span>
+                <div className='flex flex-col gap-0.5 min-w-0'>
+                  <span className='font-semibold text-[13px] text-zinc-900'>
+                    Invite to project
+                  </span>
+                  <span className='text-xs text-[#047857]'>
+                    Give someone a role across all project files
+                  </span>
+                </div>
+              </div>
+              <a
+                href={`/workspace/projects/${encodeURIComponent(projectId)}#people`}
+                className='h-[34px] px-3 rounded-[10px] bg-[#059669] hover:bg-[#047857] text-white font-semibold text-[13px] inline-flex items-center whitespace-nowrap no-underline transition-colors'
+              >
+                Open People
+              </a>
+            </div>
+          ) : null}
         </div>
 
         {!hasPermissionToConfigure && (

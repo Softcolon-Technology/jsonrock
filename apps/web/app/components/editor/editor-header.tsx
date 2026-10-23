@@ -11,7 +11,6 @@ import {
   GitCompareArrows,
   History,
   Home,
-  KeyRound,
   LinkIcon,
   Loader2,
   MoreHorizontal,
@@ -23,7 +22,7 @@ import EditorActionBtn from '../button/editor-action-btn'
 import Link from 'next/link'
 import Image from 'next/image'
 import { FaGithub } from 'react-icons/fa6'
-import { UserButton, useUser } from '@clerk/nextjs'
+import { useAuth, useUser } from '@clerk/nextjs'
 import {
   useCallback,
   useEffect,
@@ -34,7 +33,19 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
+import { AccountMenu } from '../account-menu'
 import { PortalFullScreenLoader } from '../Loader'
+import { invalidateRemoteLibrary } from '@/lib/api/library-cache'
+import { createRemoteFile } from '@/lib/create-project-file'
+import { isProjectsEnabled } from '@/lib/feature-flags'
+import { signedInHomePath } from '@/lib/home'
+import { useDocumentTitle } from '@/hooks/use-document-title'
+import { useHomeHref } from '@/hooks/use-home-href'
+import { useRemoteFile } from '@/hooks/use-remote-file'
+import type { DocType } from '@/types/library'
+import { DocumentBreadcrumb } from './header/document-breadcrumb'
+import { NewDocumentMenu, type NewMenuItem } from './header/new-document-menu'
+import { HeaderActions } from './header/header-actions'
 
 interface Props {
   documentType: ShareType
@@ -110,7 +121,7 @@ const iconBtnClass = () =>
     'dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
   )
 
-const EditorHeader = ({
+const LegacyEditorHeader = ({
   documentType,
   documentSlug,
   isJsonValid,
@@ -126,6 +137,9 @@ const EditorHeader = ({
   const [visibleCount, setVisibleCount] = useState(HEADER_ACTIONS.length)
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 })
   const [mounted, setMounted] = useState(false)
+
+  // Keeps the browser tab title in sync with the open file name.
+  useDocumentTitle(documentSlug, documentType, { isSaving: isAutoSaving })
 
   const headerRef = useRef<HTMLElement>(null)
   const leftRef = useRef<HTMLDivElement>(null)
@@ -507,7 +521,7 @@ const EditorHeader = ({
         </div>
 
         <Link
-          href='/account/mcp'
+          href='/mcp'
           className={iconBtnClass()}
           title='MCP — create a token for AI agents'
           aria-label='MCP tokens'
@@ -536,40 +550,207 @@ const EditorHeader = ({
         </Link>
 
         {isPending && <PortalFullScreenLoader />}
-        <Link
-          href='/'
-          onClick={(e) => {
-            e.preventDefault()
-            startTransition(() => {
-              router.push('/')
-            })
-          }}
+        <HomeNavLink
           className={cn(
             iconBtnClass(),
             'hidden sm:flex items-center justify-center'
           )}
-          title='Go to Home'
-          aria-label='Go to Home'
-        >
-          <Home size={18} />
-        </Link>
+        />
 
-        {isSignedIn ? (
-          <div className='flex items-center ml-1'>
-            <UserButton>
-              <UserButton.MenuItems>
-                <UserButton.Link
-                  label='MCP tokens'
-                  labelIcon={<KeyRound size={16} />}
-                  href='/account/mcp'
-                />
-              </UserButton.MenuItems>
-            </UserButton>
-          </div>
-        ) : null}
+        {isSignedIn ? <AccountMenu className='ml-1 flex items-center' /> : null}
       </div>
     </header>
   )
 }
+
+const NEW_MENU_LABEL: Record<string, string> = {
+  json: 'JSON',
+  text: 'Text',
+  markdown: 'Markdown',
+  html: 'HTML',
+  diff: 'Diff checker',
+}
+
+function withRenameQuery(openUrl: string): string {
+  try {
+    const url = new URL(openUrl, window.location.origin)
+    url.searchParams.set('rename', '1')
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    const join = openUrl.includes('?') ? '&' : '?'
+    return `${openUrl}${join}rename=1`
+  }
+}
+
+/** Workspace header when projects are enabled: breadcrumb + New / Workspace / Share / bell / avatar. */
+const ProjectsEditorHeader = ({
+  documentType,
+  documentSlug,
+  isJsonValid,
+  isAutoSaving,
+  onOpenShareModal,
+  currentViewMode,
+  previewOnlyView = false,
+}: Props) => {
+  const { isSignedIn, getToken } = useAuth()
+  const { isSignedIn: userSignedIn } = useUser()
+  const signedIn = isSignedIn || userSignedIn
+  const [isPending, startTransition] = useTransition()
+  const [saveIntoProject, setSaveIntoProject] = useState(false)
+  const [focusRename, setFocusRename] = useState(false)
+  const router = useRouter()
+  const { file, project, rename: renameRemote } = useRemoteFile(documentSlug)
+  const activeProjectId = project?.id ?? file?.projectId ?? null
+  const isRemoteViewer = file?.role === 'viewer'
+
+  // When editing a project file, default New → create into that project.
+  useEffect(() => {
+    if (activeProjectId) setSaveIntoProject(true)
+  }, [activeProjectId])
+  const { title, rename, canRename } = useDocumentTitle(
+    documentSlug,
+    documentType,
+    {
+      isSaving: isAutoSaving,
+      // Always PATCH when signed in (file may not be in the library cache yet).
+      remoteRename: signedIn && !isRemoteViewer ? renameRemote : null,
+      remoteTitle: file?.title,
+    }
+  )
+
+  // Focus title after New → create (URL has ?rename=1); strip the flag once.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (url.searchParams.get('rename') !== '1') return
+    setFocusRename(true)
+    url.searchParams.delete('rename')
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${url.pathname}${url.search}${url.hash}`
+    )
+  }, [documentSlug])
+
+  // Same navigation as the legacy header's `navigateTo`.
+  const navigateTo = (href: string) => {
+    startTransition(() => {
+      router.push(href)
+    })
+  }
+
+  const createFile = useCallback(
+    async (item: NewMenuItem) => {
+      if (!signedIn) return null
+      if (item.id === 'diff') return null
+      const type = item.id as DocType
+      if (!['json', 'text', 'markdown', 'html'].includes(type)) return null
+      const intoProject =
+        saveIntoProject && activeProjectId ? activeProjectId : null
+      const { openUrl } = await createRemoteFile(getToken, type, intoProject)
+      invalidateRemoteLibrary()
+      return withRenameQuery(openUrl)
+    },
+    [signedIn, getToken, saveIntoProject, activeProjectId]
+  )
+
+  return (
+    <header
+      data-testid='jr-header'
+      className={cn(
+        'relative z-10 flex h-[60px] shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-3 sm:gap-5 sm:px-5',
+        'dark:border-zinc-900 dark:bg-zinc-950'
+      )}
+    >
+      <div className='shrink-0'>
+        <HeaderLogo
+          type={documentType}
+          slug={documentSlug}
+          isValid={isJsonValid}
+          viewMode={currentViewMode}
+        />
+      </div>
+
+      <DocumentBreadcrumb
+        documentType={documentType}
+        title={title}
+        onRename={rename}
+        canRename={canRename && !previewOnlyView && !isRemoteViewer}
+        isAutoSaving={isAutoSaving}
+        isPersisted={!!documentSlug}
+        autoFocusRename={focusRename && !!documentSlug}
+        projectId={activeProjectId}
+        projectName={project?.name ?? null}
+      />
+
+      <span className='flex-1' />
+
+      <div className='flex shrink-0 items-center gap-2'>
+        {previewOnlyView ? (
+          <span className='text-xs font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500'>
+            View only
+          </span>
+        ) : (
+          <NewDocumentMenu
+            items={HEADER_ACTIONS.map((a) => ({
+              id: a.id,
+              label: NEW_MENU_LABEL[a.id] ?? a.label,
+              href: a.href,
+              icon: a.icon,
+            }))}
+            primaryId={documentType}
+            onNavigate={navigateTo}
+            onCreateFile={signedIn ? createFile : undefined}
+            projectId={activeProjectId}
+            projectName={project?.name ?? null}
+            saveIntoProject={saveIntoProject}
+            onSaveIntoProjectChange={setSaveIntoProject}
+          />
+        )}
+        <HeaderActions
+          isSignedIn={!!signedIn}
+          documentSlug={documentSlug}
+          isAutoSaving={isAutoSaving}
+          onOpenShare={() => onOpenShareModal(true)}
+          onGoHome={() => navigateTo(signedInHomePath())}
+        />
+      </div>
+      {isPending && <PortalFullScreenLoader />}
+    </header>
+  )
+}
+
+function HomeNavLink({ className }: { className?: string }) {
+  const homeHref = useHomeHref()
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+
+  return (
+    <>
+      {isPending && <PortalFullScreenLoader />}
+      <Link
+        href={homeHref}
+        onClick={(e) => {
+          e.preventDefault()
+          startTransition(() => {
+            router.push(homeHref)
+          })
+        }}
+        className={className}
+        title='Go to Home'
+        aria-label='Go to Home'
+      >
+        <Home size={18} />
+      </Link>
+    </>
+  )
+}
+
+const EditorHeader = (props: Props) =>
+  isProjectsEnabled ? (
+    <ProjectsEditorHeader {...props} />
+  ) : (
+    <LegacyEditorHeader {...props} />
+  )
 
 export default EditorHeader

@@ -1,13 +1,16 @@
 import { Request, Response } from 'express'
 import { ShareService } from '../services/share.service'
 import { UserService } from '../services/user.service'
+import { ProjectService } from '../services/project.service'
 import { sendShareLinkEmail } from '../services/email.service'
+import { unwrapContentKey } from '../mcp/crypto'
 import logger from '../config/logger'
 import { ShareTypeEnum, ModeEnum, AccessTypeEnum } from '../enums/enum'
 import { AuthenticatedRequest } from '../middlewares/auth.middleware'
 
 const shareService = new ShareService()
 const userService = new UserService()
+const projectService = new ProjectService()
 
 // Multer types from @types/multer
 interface MulterRequest extends Request {
@@ -45,6 +48,7 @@ export class ShareController {
         iv,
         salt,
         ownerKeyWrapped,
+        contentKeyWrapped,
         mode,
         isPrivate,
         accessType,
@@ -65,9 +69,12 @@ export class ShareController {
           isPrivate === true && ownerId && ownerKeyWrapped
             ? ownerKeyWrapped
             : undefined,
+        contentKeyWrapped:
+          ownerId && contentKeyWrapped ? contentKeyWrapped : undefined,
         mode: mode || ModeEnum.FORMATTER,
         isPrivate: isPrivate || false,
-        accessType: accessType || AccessTypeEnum.VIEWER,
+        // Share links are view-only; edit requires owner / project membership.
+        accessType: AccessTypeEnum.VIEWER,
         previewOnly: previewOnly === true,
         type: type || ShareTypeEnum.JSON,
         slug,
@@ -180,6 +187,57 @@ export class ShareController {
       })
     } catch (error) {
       logger.error('Owner unlock error:', error)
+      res.status(500).json({ error: 'Internal Server Error' })
+    }
+  }
+
+  /**
+   * Authenticated owner or project member: recover the public `#key=` for a
+   * document that stored `contentKeyWrapped` at create/save time.
+   */
+  async getContentKey(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const userId = req.auth?.userId
+      if (!userId) {
+        res.status(401).json({ error: 'Authentication required.' })
+        return
+      }
+
+      const { slug } = req.params
+      const record = await shareService.getShareLink(slug as string)
+      if (!record) {
+        res.status(404).json({ error: 'Not found' })
+        return
+      }
+
+      if (record.isPrivate) {
+        res.status(400).json({
+          error:
+            'Password-protected documents cannot use content-key recovery.',
+        })
+        return
+      }
+
+      if (!(await projectService.canReadShare(slug as string, userId))) {
+        res.status(404).json({ error: 'Not found' })
+        return
+      }
+
+      if (!record.contentKeyWrapped || !record.ownerId) {
+        res.status(404).json({
+          error:
+            'No recoverable encryption key for this document. Open it from the original link that includes #key=.',
+        })
+        return
+      }
+
+      const keyWrapSecret = await userService.getOrCreateKeyWrapSecret(
+        record.ownerId
+      )
+      const rawKey = unwrapContentKey(record.contentKeyWrapped, keyWrapSecret)
+      res.json({ keyString: rawKey.toString('base64url') })
+    } catch (error) {
+      logger.error('Content key recovery error:', error)
       res.status(500).json({ error: 'Internal Server Error' })
     }
   }
@@ -460,6 +518,7 @@ export class ShareController {
         iv,
         salt,
         ownerKeyWrapped,
+        contentKeyWrapped,
         mode,
         isPrivate,
         accessType,
@@ -497,7 +556,8 @@ export class ShareController {
           salt: salt !== undefined ? salt : existing.salt,
           mode,
           isPrivate: isPrivate || false,
-          accessType,
+          // Share links are view-only; edit requires owner / project membership.
+          accessType: AccessTypeEnum.VIEWER,
           previewOnly: nextPreviewOnly,
           type: type || ShareTypeEnum.JSON,
           ownerKeyWrapped: canStoreOwnerWrap
@@ -505,6 +565,8 @@ export class ShareController {
             : isPrivate === false
               ? null
               : undefined,
+          contentKeyWrapped:
+            nextOwnerId && contentKeyWrapped ? contentKeyWrapped : undefined,
         })
         res.json({
           success: true,
@@ -527,9 +589,12 @@ export class ShareController {
           isPrivate === true && ownerId && ownerKeyWrapped
             ? ownerKeyWrapped
             : undefined,
+        contentKeyWrapped:
+          ownerId && contentKeyWrapped ? contentKeyWrapped : undefined,
         mode: mode || ModeEnum.FORMATTER,
         isPrivate: isPrivate || false,
-        accessType: accessType || AccessTypeEnum.EDITOR,
+        // Share links are view-only; edit requires owner / project membership.
+        accessType: AccessTypeEnum.VIEWER,
         previewOnly: previewOnly === true,
         type: type || ShareTypeEnum.JSON,
       })

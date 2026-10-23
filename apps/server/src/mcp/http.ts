@@ -67,7 +67,7 @@ export function createMcpRouter(): Router {
     if (!secret) {
       unauthorized(
         res,
-        'A JSON Rock MCP token is required. Create one while signed in at /account/mcp and send it as Authorization: Bearer jr_mcp_...'
+        'A JSON Rock MCP token is required. Create one while signed in at /workspace/mcp and send it as Authorization: Bearer jr_mcp_...'
       )
       return
     }

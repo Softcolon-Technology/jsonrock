@@ -34,6 +34,13 @@ interface LocalHistoryModalProps {
     slug: string,
     title: string
   ) => Promise<LocalDocumentRecord | null>
+  /**
+   * `modal` (default) renders the full dialog. `embedded` renders only the body
+   * (toolbar + list) so a parent such as the Files modal can supply the chrome.
+   */
+  variant?: 'modal' | 'embedded'
+  /** Controlled search query. When set, the built-in search input is hidden. */
+  searchQuery?: string
 }
 
 function formatUpdatedAt(timestamp: number): string {
@@ -65,8 +72,12 @@ export default function LocalHistoryModal({
   onDeleteDocument,
   onClearAll,
   onRenameDocument,
+  variant = 'modal',
+  searchQuery,
 }: LocalHistoryModalProps) {
-  const [search, setSearch] = React.useState('')
+  const isEmbedded = variant === 'embedded'
+  const [internalSearch, setSearch] = React.useState('')
+  const search = searchQuery ?? internalSearch
   const [editingSlug, setEditingSlug] = React.useState<string | null>(null)
   const [draftTitle, setDraftTitle] = React.useState('')
   const [isSavingTitle, setIsSavingTitle] = React.useState(false)
@@ -136,68 +147,84 @@ export default function LocalHistoryModal({
   if (!isOpen) return null
 
   return (
-    <div className='fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200'>
-      <div className='absolute inset-0' onClick={onClose} />
+    <div
+      className={
+        isEmbedded
+          ? 'flex min-h-0 flex-col'
+          : 'fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200'
+      }
+    >
+      {!isEmbedded && <div className='absolute inset-0' onClick={onClose} />}
 
       <div
         className={cn(
-          'relative z-10 w-full max-w-3xl rounded-xl border bg-white p-5 shadow-2xl flex flex-col gap-4 max-h-[85vh]',
-          !forceLightMode && 'dark:bg-zinc-950 dark:border-zinc-800'
+          isEmbedded
+            ? 'relative flex flex-col gap-3 px-5 py-4'
+            : 'relative z-10 w-full max-w-3xl rounded-xl border bg-white p-5 shadow-2xl flex flex-col gap-4 max-h-[85vh]',
+          !isEmbedded &&
+            !forceLightMode &&
+            'dark:bg-zinc-950 dark:border-zinc-800'
         )}
       >
-        <div className='flex items-center justify-between gap-3'>
-          <div>
-            <h3
-              className={cn(
-                'text-lg font-semibold text-zinc-900 flex items-center gap-2',
-                !forceLightMode && 'dark:text-zinc-100'
-              )}
-            >
-              <FolderOpen size={18} className='text-emerald-600' />
-              Local History
-            </h3>
-            <p
-              className={cn(
-                'text-sm text-zinc-500 mt-1',
-                !forceLightMode && 'dark:text-zinc-400'
-              )}
-            >
-              Files stored in your browser using IndexedDB.
-            </p>
-          </div>
+        {!isEmbedded && (
+          <div className='flex items-center justify-between gap-3'>
+            <div>
+              <h3
+                className={cn(
+                  'text-lg font-semibold text-zinc-900 flex items-center gap-2',
+                  !forceLightMode && 'dark:text-zinc-100'
+                )}
+              >
+                <FolderOpen size={18} className='text-emerald-600' />
+                Local History
+              </h3>
+              <p
+                className={cn(
+                  'text-sm text-zinc-500 mt-1',
+                  !forceLightMode && 'dark:text-zinc-400'
+                )}
+              >
+                Files stored in your browser using IndexedDB.
+              </p>
+            </div>
 
-          <button
-            onClick={onClose}
-            className={cn(
-              'p-2 rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 transition-colors hover:cursor-pointer',
-              !forceLightMode &&
-                'dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
-            )}
-            aria-label='Close local history'
-          >
-            <X size={18} />
-          </button>
-        </div>
+            <button
+              onClick={onClose}
+              className={cn(
+                'p-2 rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 transition-colors hover:cursor-pointer',
+                !forceLightMode &&
+                  'dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
+              )}
+              aria-label='Close local history'
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
 
         <div className='flex items-center gap-2'>
-          <div className='relative flex-1'>
-            <Search
-              size={14}
-              className='absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400'
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder='Search by slug, title, or content preview'
-              disabled={isLoading}
-              className={cn(
-                'w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 py-2 text-sm text-zinc-900 outline-none focus:ring-1 focus:ring-emerald-500/40',
-                isLoading && 'opacity-60 cursor-not-allowed',
-                !forceLightMode &&
-                  'dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100'
-              )}
-            />
-          </div>
+          {searchQuery === undefined ? (
+            <div className='relative flex-1'>
+              <Search
+                size={14}
+                className='absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400'
+              />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder='Search by slug, title, or content preview'
+                disabled={isLoading}
+                className={cn(
+                  'w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 py-2 text-sm text-zinc-900 outline-none focus:ring-1 focus:ring-emerald-500/40',
+                  isLoading && 'opacity-60 cursor-not-allowed',
+                  !forceLightMode &&
+                    'dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100'
+                )}
+              />
+            </div>
+          ) : (
+            <div className='flex-1' />
+          )}
 
           <button
             onClick={() => onClearAll()}

@@ -24,6 +24,10 @@ interface CreateShareInput {
   slug?: string
   ownerId?: string
   contentKeyWrapped?: string | null
+  /** Library display title (max 60). */
+  title?: string | null
+  /** Project to attach to; null clears. Ignored on create unless set. */
+  projectId?: string | null
 }
 
 export class ShareService {
@@ -57,6 +61,11 @@ export class ShareService {
       }
     }
 
+    const title =
+      typeof input.title === 'string' && input.title.trim()
+        ? input.title.trim().slice(0, 60)
+        : undefined
+
     const shareLink = new ShareLink({
       slug,
       ownerId: input.ownerId || undefined,
@@ -74,6 +83,7 @@ export class ShareService {
       isPrivate: input.isPrivate,
       accessType: input.accessType || AccessTypeEnum.VIEWER,
       previewOnly: input.previewOnly === true,
+      ...(title ? { title } : {}),
     })
 
     return shareLink.save()
@@ -123,6 +133,12 @@ export class ShareService {
 
     if (input.contentKeyWrapped !== undefined) {
       updateDoc.contentKeyWrapped = input.contentKeyWrapped
+    }
+
+    if (input.title !== undefined) {
+      const title =
+        typeof input.title === 'string' ? input.title.trim().slice(0, 60) : ''
+      updateDoc.title = title || null
     }
 
     // Public docs never keep an owner wrap; private docs update only when provided.
