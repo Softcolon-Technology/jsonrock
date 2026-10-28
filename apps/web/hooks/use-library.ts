@@ -11,6 +11,7 @@ import {
 } from '@/lib/api/library-cache'
 import { createProject } from '@/lib/api/projects'
 import { deleteLocalDocumentBySlug } from '@/lib/local-docs'
+import { mergeLocalTitlesOntoRemote } from '@/lib/merge-local-titles'
 import { getSocket } from '@/lib/socket'
 import {
   normalizeProject,
@@ -51,10 +52,9 @@ export function useLibrary() {
       try {
         // One shared /files request — projects come embedded (no second /projects call).
         const lib = await fetchCachedLibrary(getToken, cacheKey, force)
-        setData({
-          standalone: lib.standalone,
-          projects: lib.projects,
-        })
+        // Overlay IndexedDB names onto Untitled API titles for the standalone list.
+        const standalone = await mergeLocalTitlesOntoRemote(lib.standalone)
+        setData({ standalone, projects: lib.projects })
       } catch (e) {
         setError(errorMessage(e, 'Could not load your library'))
       } finally {

@@ -1,9 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { invalidateRemoteLibrary } from '@/lib/api/library-cache'
 import {
   DEFAULT_DOCUMENT_TITLE,
   getLocalDocumentBySlug,
+  isPlaceholderDocumentTitle,
   syncTitle,
   type LocalDocumentType,
 } from '@/lib/local-docs'
@@ -15,6 +17,11 @@ export interface UseDocumentTitleOptions {
   remoteRename?: ((title: string) => Promise<void>) | null
   /** Remote file title, shown when there is no local (IndexedDB) copy yet. */
   remoteTitle?: string | null
+  /**
+   * True once GET /api/files/:slug has settled and a remote file exists.
+   * Used to backfill remote "Untitled" from a meaningful local name.
+   */
+  remoteAvailable?: boolean
 }
 
 const PENDING_TITLE_KEY = 'jr-pending-doc-title'
@@ -46,6 +53,22 @@ export function takePendingDocumentTitle(): string | null {
   return t
 }
 
+function pickDisplayTitle(
+  type: LocalDocumentType,
+  local: string,
+  localIsCustom: boolean,
+  remote: string
+): string {
+  const fallback = DEFAULT_DOCUMENT_TITLE[type]
+  // Explicit local rename always wins.
+  if (localIsCustom && local) return local
+  // Real remote name beats auto/local placeholders.
+  if (remote && !isPlaceholderDocumentTitle(remote, type)) return remote
+  // Keep named local files (incl. pre-Workspace content-derived titles).
+  if (local && !isPlaceholderDocumentTitle(local, type)) return local
+  return remote || local || fallback
+}
+
 /**
  * Title of the open document. Titles live in IndexedDB (never sent in the E2EE
  * payload); a remote rename, when available, is applied first and then mirrored locally.
@@ -57,10 +80,12 @@ export function useDocumentTitle(
     isSaving = false,
     remoteRename = null,
     remoteTitle = null,
+    remoteAvailable = false,
   }: UseDocumentTitleOptions = {}
 ) {
   const fallback = DEFAULT_DOCUMENT_TITLE[type]
   const [title, setTitle] = useState<string>(fallback)
+  const backfilledSlug = useRef<string | null>(null)
 
   useEffect(() => {
     if (!slug) {
@@ -75,21 +100,60 @@ export function useDocumentTitle(
         const local = record?.title?.trim() || ''
         const remote = remoteTitle?.trim() || ''
         const localIsCustom = record?.titleIsCustom === true
-        // Library/remote title wins over auto local titles (incl. old
-        // content-derived names). Explicit renames (titleIsCustom) win locally.
-        if (localIsCustom && local) {
-          setTitle(local)
-          return
-        }
-        setTitle(remote || local || fallback)
+        setTitle(pickDisplayTitle(type, local, localIsCustom, remote))
       })
       .catch(() => {
-        if (!cancelled) setTitle(remoteTitle?.trim() || fallback)
+        if (!cancelled) {
+          const remote = remoteTitle?.trim() || ''
+          setTitle(pickDisplayTitle(type, '', false, remote))
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [slug, fallback, isSaving, remoteTitle])
+  }, [slug, type, fallback, isSaving, remoteTitle])
+
+  // Once remote meta is loaded: if API still says Untitled but IndexedDB has a
+  // real name, push that name to the server so Workspace/library match local.
+  useEffect(() => {
+    if (!slug || !remoteRename || !remoteAvailable) return
+    if (backfilledSlug.current === slug) return
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const record = await getLocalDocumentBySlug(slug)
+        if (cancelled || !record) return
+        const local = record.title?.trim() || ''
+        const remote = remoteTitle?.trim() || ''
+        if (
+          !local ||
+          isPlaceholderDocumentTitle(local, type) ||
+          !isPlaceholderDocumentTitle(remote, type)
+        ) {
+          backfilledSlug.current = slug
+          return
+        }
+        await remoteRename(local)
+        if (cancelled) return
+        await syncTitle(slug, local)
+        if (cancelled) return
+        invalidateRemoteLibrary()
+        setTitle(local)
+        backfilledSlug.current = slug
+      } catch {
+        // Keep local display; retry next open.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [slug, type, remoteRename, remoteTitle, remoteAvailable])
+
+  useEffect(() => {
+    backfilledSlug.current = null
+  }, [slug])
 
   /** Throws when the remote rename fails (local copy is left untouched). */
   const rename = useCallback(

@@ -12,6 +12,7 @@ import {
 } from '@/lib/api/library-cache'
 import { errorMessage } from '@/hooks/use-library'
 import { isProjectsEnabled } from '@/lib/feature-flags'
+import { mergeLocalTitlesOntoRemote } from '@/lib/merge-local-titles'
 import type { Project, RemoteFile } from '@/types/library'
 
 export type { RemoteProjectGroup }
@@ -51,7 +52,20 @@ export function useRemoteLibrary(enabled = true) {
       if (hasDataRef.current) setRefreshing(true)
       else setLoading(true)
       try {
-        setData(await fetchCachedLibrary(getToken, cacheKey, force))
+        const lib = await fetchCachedLibrary(getToken, cacheKey, force)
+        const standalone = await mergeLocalTitlesOntoRemote(lib.standalone)
+        const groups = await Promise.all(
+          lib.groups.map(async (g) => ({
+            ...g,
+            files: await mergeLocalTitlesOntoRemote(g.files),
+          }))
+        )
+        setData({
+          ...lib,
+          standalone,
+          groups,
+          projects: lib.projects,
+        })
       } catch (e) {
         setError(errorMessage(e, 'Could not load remote files'))
       } finally {
@@ -155,6 +169,8 @@ export function useRemoteFile(slug: string | null) {
       try {
         const next = await getFileMeta(getToken, slug)
         if (req !== reqRef.current) return
+        // Keep API title as-is so useDocumentTitle can detect Untitled and
+        // PATCH the real IndexedDB name up to the server.
         setState({ file: next.file, project: next.project })
       } catch {
         if (req === reqRef.current) setState(EMPTY_FILE)

@@ -150,13 +150,13 @@ export function ProjectHeader({
                 readOnly={!isOwner}
                 testId='jr-project-name'
               />
-              {isOwner ? (
+              {/* {isOwner ? (
                 <RolePill role='owner' data-testid='jr-project-role'>
                   You are owner
                 </RolePill>
               ) : (
                 <RolePill role={project.role} data-testid='jr-project-role' />
-              )}
+              )} */}
             </div>
             {error ? (
               <span
