@@ -599,7 +599,12 @@ const ProjectsEditorHeader = ({
   const [saveIntoProject, setSaveIntoProject] = useState(false)
   const [focusRename, setFocusRename] = useState(false)
   const router = useRouter()
-  const { file, project, rename: renameRemote } = useRemoteFile(documentSlug)
+  const {
+    file,
+    project,
+    loading: remoteLoading,
+    rename: renameRemote,
+  } = useRemoteFile(documentSlug)
   const activeProjectId = project?.id ?? file?.projectId ?? null
   const isRemoteViewer = file?.role === 'viewer'
 
@@ -615,6 +620,10 @@ const ProjectsEditorHeader = ({
       // Always PATCH when signed in (file may not be in the library cache yet).
       remoteRename: signedIn && !isRemoteViewer ? renameRemote : null,
       remoteTitle: file?.title,
+      // Wait until meta fetch finishes so we don't treat "loading" as Untitled.
+      remoteAvailable: Boolean(
+        signedIn && documentSlug && !remoteLoading && file
+      ),
     }
   )
 

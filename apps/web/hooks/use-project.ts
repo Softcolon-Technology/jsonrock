@@ -15,6 +15,7 @@ import {
   updateMemberRole,
 } from '@/lib/api/projects'
 import { deleteLocalDocumentBySlug } from '@/lib/local-docs'
+import { mergeLocalTitlesOntoRemote } from '@/lib/merge-local-titles'
 import { getSocket } from '@/lib/socket'
 import { errorMessage } from '@/hooks/use-library'
 import { normalizeInvite } from '@/types/library'
@@ -67,7 +68,10 @@ export function useProject(id: string) {
       if (soft) setRefreshing(true)
       try {
         const next = await getProject(getToken, id)
-        applyDetail(next)
+        applyDetail({
+          ...next,
+          files: await mergeLocalTitlesOntoRemote(next.files ?? []),
+        })
         setError(null)
         setErrorKind(null)
       } catch (e) {

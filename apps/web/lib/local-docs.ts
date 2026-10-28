@@ -43,6 +43,18 @@ export const DEFAULT_DOCUMENT_TITLE: Record<LocalDocumentType, string> = {
   html: 'Untitled HTML',
 }
 
+/** True for empty / generic Untitled placeholders (local or API). */
+export function isPlaceholderDocumentTitle(
+  title: string | null | undefined,
+  type?: LocalDocumentType
+): boolean {
+  const t = (title ?? '').replace(/\s+/g, ' ').trim()
+  if (!t) return true
+  if (t === 'Untitled') return true
+  if (type && t === DEFAULT_DOCUMENT_TITLE[type]) return true
+  return /^Untitled(\s+[A-Za-z]+)?$/i.test(t)
+}
+
 function isIndexedDbAvailable(): boolean {
   return typeof window !== 'undefined' && 'indexedDB' in window
 }
@@ -214,11 +226,19 @@ function ensureRecordShape(
   let title: string
   if (titleIsCustom && existingTitle) {
     title = truncateDocumentTitle(existingTitle)
-  } else if (existingTitle) {
+  } else if (
+    existingTitle &&
+    !isPlaceholderDocumentTitle(existingTitle, raw.type)
+  ) {
     title = truncateDocumentTitle(existingTitle)
   } else {
-    // Never invent a title from file body — keep list/editor on "Untitled …".
-    title = DEFAULT_DOCUMENT_TITLE[raw.type]
+    // Legacy IndexedDB rows often had no `title` field — recover from content
+    // once so Workspace doesn't show "Untitled" for named local files.
+    const derived = deriveDocumentTitle(raw.content || '', raw.type)
+    title =
+      existingTitle && isPlaceholderDocumentTitle(derived, raw.type)
+        ? truncateDocumentTitle(existingTitle)
+        : derived
   }
 
   return {
@@ -244,6 +264,16 @@ function needsTitleBackfill(
   if (!raw) return false
   if (typeof raw.title !== 'string' || !raw.title.trim()) return true
   if (raw.titleIsCustom === undefined) return true
+  // Re-derive once if we previously persisted a bare Untitled placeholder
+  // while content still has a usable name (Workspace launch regression).
+  if (
+    raw.type &&
+    isPlaceholderDocumentTitle(raw.title, raw.type) &&
+    raw.titleIsCustom !== true
+  ) {
+    const derived = deriveDocumentTitle(raw.content || '', raw.type)
+    if (!isPlaceholderDocumentTitle(derived, raw.type)) return true
+  }
   return false
 }
 
